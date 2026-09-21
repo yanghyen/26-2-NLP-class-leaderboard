@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.dependencies import require_admin
 from app.core.enums import SubmissionStatus
-from app.models import CourseRoster, EvaluationJob, JoinCode, Submission, SubmissionFile, User
+from app.models import CourseRoster, EvaluationJob, JoinCode, Submission, SubmissionFile, Task, User
 from app.queue import JobQueue, QueueUnavailableError, get_job_queue
 from app.schemas import (
     EvaluationJobAdminOut,
@@ -79,16 +79,71 @@ async def upload_roster(
 def list_roster(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
-) -> list[CourseRoster]:
-    return list(db.scalars(select(CourseRoster).order_by(CourseRoster.student_number)).all())
+) -> list[RosterRowOut]:
+    rows = db.execute(
+        select(CourseRoster, User.nickname)
+        .outerjoin(User, User.id == CourseRoster.registered_user_id)
+        .order_by(CourseRoster.student_number)
+    ).all()
+    return [
+        RosterRowOut(
+            student_number=roster.student_number,
+            real_name=roster.real_name,
+            section=roster.section,
+            registered_user_id=roster.registered_user_id,
+            nickname=nickname,
+        )
+        for roster, nickname in rows
+    ]
+
+
+@router.get("/join-codes", response_model=list[JoinCodeOut])
+def list_join_codes(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> list[JoinCode]:
+    return list(db.scalars(select(JoinCode).order_by(JoinCode.created_at.desc())).all())
+
+
+@router.post("/join-codes/{join_code_id}/deactivate", response_model=JoinCodeOut)
+def deactivate_join_code(
+    join_code_id: str,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_admin),
+) -> JoinCode:
+    join_code = db.get(JoinCode, join_code_id)
+    if join_code is None:
+        raise HTTPException(status_code=404, detail="가입 코드를 찾을 수 없습니다.")
+    join_code.is_active = False
+    write_audit(
+        db,
+        actor=actor,
+        action="join_code.deactivated",
+        target_type="join_code",
+        target_id=join_code.id,
+    )
+    db.commit()
+    db.refresh(join_code)
+    return join_code
 
 
 @router.get("/submissions", response_model=list[SubmissionAdminOut])
 def list_submissions(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
-) -> list[Submission]:
-    return list(db.scalars(select(Submission).order_by(Submission.created_at.desc())).all())
+) -> list[SubmissionAdminOut]:
+    rows = db.execute(
+        select(Submission, User.nickname, Task.slug, Task.title)
+        .join(User, User.id == Submission.user_id)
+        .join(Task, Task.id == Submission.task_id)
+        .order_by(Submission.created_at.desc())
+    ).all()
+    return [
+        SubmissionAdminOut.model_validate(submission).model_copy(
+            update={"nickname": nickname, "task_slug": task_slug, "task_title": task_title}
+        )
+        for submission, nickname, task_slug, task_title in rows
+    ]
 
 
 @router.get("/jobs", response_model=list[EvaluationJobAdminOut])

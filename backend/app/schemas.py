@@ -74,6 +74,7 @@ class RosterRowOut(BaseModel):
     real_name: str
     section: str | None
     registered_user_id: str | None
+    nickname: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -111,8 +112,28 @@ class TaskOut(BaseModel):
     max_zip_bytes: int
     timeout_seconds: int
     evaluator_key: str
+    opens_at: datetime | None
+    dev_deadline: datetime | None
+    final_deadline: datetime | None
+    public_leaderboard_visible: bool
+    private_leaderboard_visible: bool
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TaskConfigOut(BaseModel):
+    dataset_config: dict[str, Any]
+    allowed_models: list[str]
+    artifact_policy: dict[str, Any]
+    metric_config: dict[str, Any]
+    split_config: dict[str, Any]
+    scoring_strategy: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TaskDetailOut(TaskOut):
+    config: TaskConfigOut
 
 
 class SubmissionCreateIn(BaseModel):
@@ -150,12 +171,26 @@ class ScoreOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class SubmissionFileOut(BaseModel):
+    file_type: str
+    original_filename: str
+    size_bytes: int
+    checksum_sha256: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class SubmissionDetailOut(SubmissionOut):
     scores: list[ScoreOut] = Field(default_factory=list)
+    files: list[SubmissionFileOut] = Field(default_factory=list)
+    is_final_selection: bool = False
 
 
 class SubmissionAdminOut(SubmissionOut):
     user_id: str
+    nickname: str = ""
+    task_slug: str = ""
+    task_title: str = ""
     artifact_digest: str | None
     validation_report: dict[str, Any]
     malware_scan_status: str | None
@@ -185,6 +220,8 @@ class SubmissionCreateOut(BaseModel):
 
 
 class LeaderboardRowOut(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     rank: int
     nickname: str
     avatar_id: str
@@ -193,3 +230,13 @@ class LeaderboardRowOut(BaseModel):
     primary_metric: str
     primary_score: float
     metrics: dict[str, Any]
+    model_name: str | None
+    submitted_at: datetime
+
+
+class FinalSelectionOut(BaseModel):
+    task_id: str
+    submission_id: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

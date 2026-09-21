@@ -6,17 +6,19 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.enums import EvaluationSplit, SubmissionKind
+from app.core.enums import EvaluationSplit, SubmissionKind, SubmissionStatus
 from app.db.session import get_db
 from app.dependencies import get_current_user
-from app.models import Score, Submission, Task, User
+from app.models import FinalSelection, Score, Submission, SubmissionFile, Task, User
 from app.queue import JobQueue, get_job_queue
 from app.schemas import (
     EvaluationJobOut,
+    FinalSelectionOut,
     ScoreOut,
     SubmissionCreateIn,
     SubmissionCreateOut,
     SubmissionDetailOut,
+    SubmissionFileOut,
     SubmissionOut,
 )
 from app.security.malware import MalwareScanner, get_malware_scanner
@@ -101,6 +103,20 @@ def my_submissions(
     )
 
 
+@router.get("/final-selections", response_model=list[FinalSelectionOut])
+def final_selections(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[FinalSelection]:
+    return list(
+        db.scalars(
+            select(FinalSelection)
+            .where(FinalSelection.user_id == current_user.id)
+            .order_by(FinalSelection.created_at.desc())
+        ).all()
+    )
+
+
 @router.get("/{submission_id}", response_model=SubmissionDetailOut)
 def submission_detail(
     submission_id: str,
@@ -119,4 +135,49 @@ def submission_detail(
     ).all()
     result = SubmissionDetailOut.model_validate(submission)
     result.scores = [ScoreOut.model_validate(score) for score in scores]
+    files = db.scalars(
+        select(SubmissionFile).where(SubmissionFile.submission_id == submission.id)
+    ).all()
+    result.files = [SubmissionFileOut.model_validate(file) for file in files]
+    result.is_final_selection = db.scalar(
+        select(FinalSelection).where(
+            FinalSelection.user_id == current_user.id,
+            FinalSelection.task_id == submission.task_id,
+            FinalSelection.submission_id == submission.id,
+        )
+    ) is not None
     return result
+
+
+@router.post("/{submission_id}/final-selection", response_model=FinalSelectionOut)
+def select_final_submission(
+    submission_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> FinalSelection:
+    submission = db.get(Submission, submission_id)
+    if (
+        submission is None
+        or submission.user_id != current_user.id
+        or submission.kind != SubmissionKind.EVALUATION
+        or submission.status != SubmissionStatus.COMPLETED
+    ):
+        raise HTTPException(status_code=400, detail="완료된 개발 제출만 최종 제출로 선택할 수 있습니다.")
+    selection = db.scalar(
+        select(FinalSelection).where(
+            FinalSelection.user_id == current_user.id,
+            FinalSelection.task_id == submission.task_id,
+        )
+    )
+    if selection is None:
+        selection = FinalSelection(
+            user_id=current_user.id,
+            task_id=submission.task_id,
+            submission_id=submission.id,
+        )
+        db.add(selection)
+    else:
+        selection.submission_id = submission.id
+    db.commit()
+    db.refresh(selection)
+    return selection
