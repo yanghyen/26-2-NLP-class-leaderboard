@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +12,8 @@ class EvaluationContext:
     dataset_config: dict[str, Any]
     allowed_models: list[str]
     metric_config: dict[str, Any]
+    artifact_digest: str
+    trust_remote_code: bool = field(default=False, init=False)
 
 
 class Evaluator(ABC):
@@ -22,7 +24,7 @@ class Evaluator(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def load_model(self, context: EvaluationContext) -> Any:
+    def prepare(self, context: EvaluationContext) -> Any:
         raise NotImplementedError
 
     @abstractmethod
@@ -33,9 +35,8 @@ class Evaluator(ABC):
     def compute_metrics(self, context: EvaluationContext, predictions: list[Any]) -> dict[str, Any]:
         raise NotImplementedError
 
-    def format_public_result(self, metrics: dict[str, Any]) -> dict[str, Any]:
+    def format_result(self, metrics: dict[str, Any]) -> dict[str, Any]:
         return metrics
 
     def cleanup(self, context: EvaluationContext) -> None:
         return None
-

@@ -1,4 +1,13 @@
-from tests.conftest import auth_header, login, register_student
+from app.core.enums import SubmissionStatus
+from app.models import Submission
+
+from tests.conftest import (
+    auth_header,
+    create_public_task,
+    login,
+    register_student,
+    upload_submission,
+)
 
 
 def test_student_cannot_create_task(client):
@@ -16,38 +25,12 @@ def test_student_cannot_create_task(client):
 
 def test_admin_can_create_task_and_student_submission_creates_queue_job(client):
     admin_token = login(client, "RootTA", "admin-password")
-    task_response = client.post(
-        "/tasks",
-        headers=auth_header(admin_token),
-        json={
-            "slug": "sentiment",
-            "title": "Sentiment Analysis",
-            "is_public": True,
-            "max_official_submissions": 1,
-            "config": {
-                "dataset_config": {"public_path": "hidden/sentiment/public.jsonl"},
-                "allowed_models": [],
-                "metric_config": {"primary": "macro_f1", "secondary": ["accuracy"]},
-                "split_config": {"smoke": "smoke.jsonl", "public": "public.jsonl"},
-                "scoring_strategy": "task_primary_score",
-            },
-        },
-    )
+    task_response = create_public_task(client, admin_token, max_submissions=1)
     assert task_response.status_code == 201, task_response.text
 
     register_student(client)
     student_token = login(client, "20260001", "student-password")
-    response = client.post(
-        "/submissions/sentiment",
-        headers=auth_header(student_token),
-        json={
-            "kind": "EVALUATION",
-            "model_name": "tiny-sentiment",
-            "base_model": "configured-later",
-            "seed": 42,
-            "metadata_json": {"task": "sentiment"},
-        },
-    )
+    response = upload_submission(client, student_token)
 
     assert response.status_code == 201, response.text
     body = response.json()
@@ -58,30 +41,16 @@ def test_admin_can_create_task_and_student_submission_creates_queue_job(client):
 
 def test_official_submission_limit_is_enforced(client, db_session):
     admin_token = login(client, "RootTA", "admin-password")
-    client.post(
-        "/tasks",
-        headers=auth_header(admin_token),
-        json={
-            "slug": "sentiment",
-            "title": "Sentiment Analysis",
-            "is_public": True,
-            "max_official_submissions": 1,
-        },
-    )
+    create_public_task(client, admin_token, max_submissions=1)
     register_student(client)
     student_token = login(client, "20260001", "student-password")
-    first = client.post(
-        "/submissions/sentiment",
-        headers=auth_header(student_token),
-        json={"kind": "EVALUATION", "model_name": "first"},
-    )
+    first = upload_submission(client, student_token)
     assert first.status_code == 201
 
-    second = client.post(
-        "/submissions/sentiment",
-        headers=auth_header(student_token),
-        json={"kind": "EVALUATION", "model_name": "second"},
-    )
+    submission = db_session.get(Submission, first.json()["submission"]["id"])
+    submission.status = SubmissionStatus.COMPLETED
+    db_session.commit()
+
+    second = upload_submission(client, student_token)
 
     assert second.status_code == 400
-

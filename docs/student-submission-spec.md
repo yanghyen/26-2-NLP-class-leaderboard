@@ -7,26 +7,21 @@ Each evaluated submission must eventually include two files:
 
 The notebook is stored for review and reproducibility. The server must not execute notebooks automatically.
 
-The model ZIP should contain:
+The model ZIP root must contain:
 
 ```text
-submission/
-  model/
-    config.json
-    model.safetensors
-    tokenizer files
-  submission.json
+submission.json
+model/
+  config.json
+  model.safetensors
+  tokenizer files allowed by the task
 ```
 
 `submission.json` must include at least:
 
 ```json
 {
-  "task": "sentiment",
-  "student_id": "20260001",
-  "model_name": "my-model",
-  "base_model": "configured-by-task",
-  "seed": 42
+  "base_model": "course/registered-base-model"
 }
 ```
 
@@ -52,3 +47,6 @@ def export_submission(model, tokenizer, metadata, output_zip="submission.zip"):
     shutil.make_archive("submission", "zip", root)
 ```
 
+Python modules, shell scripts, native libraries, executables, pickle files, `.pt`, `.pth`, `.bin`, nested archives, external URLs, custom Hugging Face code, and `auto_map` are rejected. The task must register the base model and architecture. Model weights must be safetensors. `trust_remote_code=False` is mandatory.
+
+Notebook outputs may contain unsafe browser content. The platform preserves the original for authenticated review but never executes it or renders its raw HTML. Treat a downloaded notebook as an untrusted file.

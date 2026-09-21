@@ -2,35 +2,62 @@
 
 ## Current State
 
-- Workspace started empty.
-- Phase 1 analysis and architecture docs are in `docs/architecture.md` and `docs/implementation-plan.md`.
-- Phase 2 backend foundation is implemented under `backend/app`.
-- Docker Compose defines separate frontend, API, worker, Postgres, and Redis services.
-- The worker is intentionally a placeholder until Phase 4.
-- Frontend is a minimal Next.js/Tailwind status page, not the full product UI yet.
-- Next.js 16 generated `frontend/AGENTS.md` and `frontend/CLAUDE.md` during `next dev`; keep them unless the Next toolchain behavior changes.
+Phase 1-2 foundations and the secure submission/mock evaluation pipeline are implemented. The active branch is `feature/secure-submission-pipeline`. Student/admin frontend workflows are still the minimal Next.js status shell.
 
-## Verification
+The submission path is now:
 
-- `python3 -m compileall backend/app` passed.
-- `backend/.venv/bin/pytest backend/tests -q` passed: 6 tests.
-- `npm run typecheck` passed in `frontend/`.
-- `npm install`/updates reported 0 vulnerabilities after upgrading Next/PostCSS.
-- Docker CLI was not available on this machine, so `docker compose config` could not be run here.
-- FastAPI server was started at `http://127.0.0.1:8000` and `/health` returned `{"status":"ok"}`.
-- Next.js dev server was started at `http://127.0.0.1:3000` and returned HTTP 200.
+```text
+multipart Notebook + model ZIP
+-> streamed incoming UUID directory
+-> Notebook / ZIP / JSON / safetensors / malware-adapter validation
+-> atomic artifact promotion
+-> EvaluationJob row + Redis FIFO Job UUID
+-> concurrency-one worker
+-> deterministic mock score
+-> COMPLETED submission and task leaderboard
+```
+
+Notebooks are preserved but never executed or rendered. Student Python/custom modules, pickle/PyTorch checkpoints, native code, nested archives, unsafe ZIP entries, unregistered models/architectures, and remote-code configuration are rejected. `EvaluationContext.trust_remote_code` is immutable `False`.
 
 ## Important Files
 
-- `docker-compose.yml`
-- `.env.example`
-- `backend/app/models.py`
-- `backend/app/api/routes/*`
-- `backend/app/services/*`
-- `backend/app/evaluators/base.py`
-- `backend/tests/*`
-- `docs/*`
+- `backend/app/security/validation.py`: bounded Notebook, ZIP, JSON, model policy, and safetensors checks.
+- `backend/app/storage/`: local trust-zone storage interface/adapter.
+- `backend/app/services/submissions.py`: upload lifecycle, cleanup, promotion, Job creation, and enqueue.
+- `backend/app/services/state.py`: allowed submission/Job transitions.
+- `backend/app/queue.py`: Redis and in-memory FIFO adapters.
+- `backend/app/worker.py`: sequential processing, score persistence, retry policy, and cleanup.
+- `backend/app/api/routes/submissions.py`, `admin.py`, `tasks.py`: UI-facing APIs and authorization.
+- `backend/alembic/versions/0002_secure_submission_pipeline.py`: artifact policy and validation metadata migration.
+- `docs/submission-security.md`: threat model, residual risk, and Docker checklist.
+- `docs/submission-api.md`: Phase 3 UI contract.
 
-## Next Best Step
+## Verification
 
-Install backend dependencies, run tests, and fix any environment-specific dependency issues. Then continue Phase 3 by adding the student/admin UI around the existing API, or continue backend Phase 4 by implementing file uploads and queue workers.
+Run before continuing:
+
+```bash
+backend/.venv/bin/pytest backend/tests -q
+backend/.venv/bin/python -m compileall -q backend/app
+cd frontend && npm run typecheck
+```
+
+The implementation machine has no Docker CLI. Compose build/runtime, Postgres enum migration behavior, Redis process integration, named-volume ownership, and container resource/isolation controls remain unverified here. The test suite uses SQLite, an in-memory queue adapter, and synthetic non-malware fixtures.
+
+## Deliberately Deferred
+
+- Real ClamAV adapter and quarantine management UI.
+- Custom AppArmor/seccomp profiles.
+- Notebook preview or browser rendering.
+- Real GPU/model loading and hidden-test evaluation.
+- Per-Job disposable evaluator container with no network and no secrets.
+- Daily submission rate limits and configurable failed-validation attempt policy.
+
+Do not enable a real Transformers evaluator inside the current worker process. It has database, Redis, and shared artifact access and is not the final hostile-model sandbox.
+
+## Next Work
+
+1. Build Phase 3 student UI against `docs/submission-api.md`: multipart submit form, progress/error codes, submission status polling, score detail, and public leaderboard.
+2. Build admin queue/submission/quarantine metadata views and authenticated download actions.
+3. On a Docker host, execute the checklist in `docs/submission-security.md`, including Postgres/Redis integration and worker restart/idempotency tests.
+4. Add a real malware scanner adapter, then design the disposable real-evaluator container backend before any GPU inference.

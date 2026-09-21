@@ -26,6 +26,7 @@ class SubmissionStatus(StrEnum):
     SCORING = "SCORING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    QUARANTINED = "QUARANTINED"
     INVALIDATED = "INVALIDATED"
 
 
@@ -34,3 +35,10 @@ class EvaluationSplit(StrEnum):
     PUBLIC = "PUBLIC"
     PRIVATE = "PRIVATE"
 
+
+class MalwareScanStatus(StrEnum):
+    DISABLED = "DISABLED"
+    CLEAN = "CLEAN"
+    INFECTED = "INFECTED"
+    SUSPICIOUS = "SUSPICIOUS"
+    ERROR = "ERROR"
