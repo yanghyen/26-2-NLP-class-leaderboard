@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import AnyHttpUrl, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -6,6 +7,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "NLP Course Leaderboard"
+    app_env: Literal["development", "test", "production"] = Field(
+        default="development", alias="APP_ENV"
+    )
     app_secret_key: str = Field(default="dev-secret-change-me", alias="APP_SECRET_KEY")
     access_token_expire_minutes: int = Field(default=720, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
     database_url: str = Field(default="sqlite:///./dev.db", alias="DATABASE_URL")
