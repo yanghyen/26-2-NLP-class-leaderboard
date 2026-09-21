@@ -77,6 +77,7 @@ class RosterRowOut(BaseModel):
 class TaskConfigIn(BaseModel):
     dataset_config: dict[str, Any] = Field(default_factory=dict)
     allowed_models: list[str] = Field(default_factory=list)
+    artifact_policy: dict[str, Any] = Field(default_factory=dict)
     metric_config: dict[str, Any] = Field(default_factory=dict)
     split_config: dict[str, Any] = Field(default_factory=dict)
     scoring_strategy: str = "task_primary_score"
@@ -136,6 +137,27 @@ class SubmissionOut(BaseModel):
     created_at: datetime
 
 
+class ScoreOut(BaseModel):
+    split: EvaluationSplit
+    primary_metric: str
+    primary_score: float
+    metrics: dict[str, Any]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SubmissionDetailOut(SubmissionOut):
+    scores: list[ScoreOut] = Field(default_factory=list)
+
+
+class SubmissionAdminOut(SubmissionOut):
+    user_id: str
+    artifact_digest: str | None
+    validation_report: dict[str, Any]
+    malware_scan_status: str | None
+    internal_error_message: str | None
+
+
 class EvaluationJobOut(BaseModel):
     id: str
     submission_id: str
@@ -145,3 +167,25 @@ class EvaluationJobOut(BaseModel):
     max_attempts: int
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class EvaluationJobAdminOut(EvaluationJobOut):
+    worker_id: str | None
+    error_kind: str | None
+    safe_error_message: str | None
+
+
+class SubmissionCreateOut(BaseModel):
+    submission: SubmissionOut
+    evaluation_job: EvaluationJobOut | None
+
+
+class LeaderboardRowOut(BaseModel):
+    rank: int
+    nickname: str
+    avatar_id: str
+    avatar_emoji: str
+    submission_id: str
+    primary_metric: str
+    primary_score: float
+    metrics: dict[str, Any]

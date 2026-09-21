@@ -77,9 +77,9 @@ Sentiment Analysis should be the first real evaluator. Machine Translation and C
 
 Hidden test files and answer keys must not be committed. Mount them into worker containers as read-only volumes and reference them through `task_configs.dataset_config`.
 
-## GPU Worker
+## Evaluation Worker
 
-Phase 2 includes only the worker entry point. Phase 4 should add Redis queue dispatch and isolated evaluation with GPU concurrency set to one by default.
+Redis dispatch and the deterministic mock evaluator are connected end to end. The worker handles one Job at a time, retries infrastructure failures once, and cleans scratch directories after every Job. Run it with `python -m app.worker`. This process is suitable for the mock evaluator only; real model loading requires the isolated container boundary documented in `docs/submission-security.md`.
 
 ## Submission Files
 
@@ -89,9 +89,10 @@ See `docs/student-submission-spec.md`. The notebook is stored but never executed
 
 Already included: password hashing, hashed join codes, role checks, roster-gated signup, reserved nickname blocking, and audit hooks.
 
-Before production: add upload validation, ZIP bomb/path traversal checks, sandboxed evaluation containers, network-disabled workers, secret rotation, HTTPS/reverse proxy, backups, monitoring, and retention policies.
+Implemented: upload trust zones, bounded streaming, ZIP traversal/bomb/link checks, data-only allowlists, safetensors parsing, Notebook non-execution, role/owner checks, safe errors, and mock worker isolation by process responsibility.
+
+Before production: connect a real fail-closed malware scanner, add a per-Job network-disabled evaluation container for real models, rotate secrets, configure HTTPS/reverse proxy, and establish backups, monitoring, quotas, and retention. See `docs/submission-security.md` and `docs/submission-api.md`.
 
 ## Backup And Recovery
 
 Back up PostgreSQL and submission storage together. Keep database snapshots and artifact backups from the same time window so scores and files remain consistent.
-

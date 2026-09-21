@@ -2,17 +2,17 @@
 
 ## Scope
 
-This repository starts with a maintainable MVP for a 60-student NLP course leaderboard. Phase 1 fixes the architecture and data model. Phase 2 implements the executable backend foundation: Docker Compose, database models, authentication, role checks, roster-gated signup, task creation, and submission records that can enqueue evaluation jobs.
+This repository contains a maintainable MVP foundation for a 60-student NLP course leaderboard. The current backend includes secure file ingestion, Redis dispatch, and deterministic mock evaluation in addition to authentication and task management.
 
 ## Services
 
 - `frontend`: Next.js + TypeScript + Tailwind entry point. Full student/admin workflows begin in Phase 3.
 - `api`: FastAPI application for accounts, roster, tasks, submissions, scores, and admin operations.
-- `worker`: separate backend image entry point. It is a placeholder in Phase 2 and will own validation/evaluation in Phase 4.
+- `worker`: separate, concurrency-one backend entry point. It consumes validated Job IDs and runs the configured server-owned evaluator.
 - `postgres`: primary relational database.
-- `redis`: queue backend for the future worker.
+- `redis`: FIFO evaluation queue containing Job UUIDs only.
 
-The API never evaluates models inside the HTTP request. The Phase 2 submission endpoint creates a submission and an `evaluation_jobs` row; Phase 4 will add Redis queue dispatch and worker execution.
+The API performs bounded structural validation but never evaluates or imports student code in the HTTP request. It queues only after validation and atomic promotion into the artifact trust zone. The worker owns evaluation lifecycle transitions and score persistence.
 
 ## Data Model
 
@@ -22,7 +22,7 @@ The API never evaluates models inside the HTTP request. The Phase 2 submission e
 - `join_codes`: active/inactive class signup codes stored as hashes.
 - `tasks` and `task_configs`: task metadata, stages, submission limits, evaluator key, datasets, allowed models, metrics, split config, and scoring strategy.
 - `submissions`: draft, baseline practice, and official evaluation records.
-- `submission_files`: notebook and model ZIP metadata, to be wired in Phase 4.
+- `submission_files`: notebook and model ZIP hashes, sizes, display names, MIME hints, and server-owned storage keys.
 - `evaluation_jobs`: queue lifecycle records with split, attempts, status, and safe errors.
 - `scores`: public/private/smoke metrics.
 - `final_selections`: student-selected final submissions.
@@ -35,15 +35,16 @@ Private identifiers are not needed for leaderboard views. Leaderboards should jo
 Each task uses an evaluator key and config rather than hardcoded datasets or model names. Evaluators implement:
 
 - `validate_submission()`
-- `load_model()`
+- `prepare()`
 - `run_inference()`
 - `compute_metrics()`
-- `format_public_result()`
+- `format_result()`
 - `cleanup()`
 
-`mock` exists now to keep the interface executable. Sentiment Analysis should be the first real evaluator, using configured dataset paths and metrics.
+`mock` now completes the queue/score/leaderboard flow using the server-computed artifact digest. Sentiment Analysis should be the first real evaluator, but only after the isolated execution backend in `docs/submission-security.md` is implemented.
 
 ## Security Boundaries
 
-Phase 2 includes password hashing, roster-gated signup, join code hashing, role checks, reserved nickname blocking, and audit log hooks for admin operations. Phase 4 must add file validation, ZIP safety checks, process/container isolation, network-blocked evaluation containers, timeout cleanup, and hidden-test-safe errors.
+Password hashing, roster-gated signup, role checks, upload trust zones, ZIP/Notebook/safetensors validation, safe errors, owner-scoped reads, and worker cleanup are implemented. The mock evaluator does not load student tensors. Real model loading remains blocked on a disposable network-disabled evaluation container; the current worker itself is not that sandbox.
 
+See `docs/submission-security.md` for the threat model and explicit residual risks, and `docs/submission-api.md` for the UI contract.
