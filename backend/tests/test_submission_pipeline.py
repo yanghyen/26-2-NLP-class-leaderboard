@@ -88,6 +88,73 @@ def test_worker_saves_score_completes_and_updates_leaderboard(
     jobs = client.get("/admin/jobs", headers=auth_header(admin_token))
     assert jobs.status_code == 200
     assert len(jobs.json()) == 2
+    submissions = client.get("/admin/submissions", headers=auth_header(admin_token))
+    assert submissions.status_code == 200
+    assert submissions.json()[0]["nickname"] == "NLPHero"
+    assert submissions.json()[0]["task_slug"] == "sentiment"
+
+
+def test_student_ui_contract_exposes_safe_task_submission_and_final_selection(
+    client, db_session, job_queue, artifact_storage
+):
+    _, student_token = setup_student_and_task(client)
+    task = client.get("/tasks/sentiment")
+    assert task.status_code == 200
+    assert task.json()["config"]["allowed_models"] == ["course/bert-base"]
+    assert task.json()["public_leaderboard_visible"] is True
+
+    response = upload_submission(client, student_token)
+    submission_id = response.json()["submission"]["id"]
+    factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
+    process_job(job_queue.dequeue(), db_factory=factory, queue=job_queue, storage=artifact_storage)
+
+    detail = client.get(
+        f"/submissions/{submission_id}", headers=auth_header(student_token)
+    )
+    assert detail.status_code == 200
+    assert {row["file_type"] for row in detail.json()["files"]} == {
+        "notebook",
+        "model_zip",
+    }
+    assert detail.json()["is_final_selection"] is False
+    selected = client.post(
+        f"/submissions/{submission_id}/final-selection",
+        headers=auth_header(student_token),
+    )
+    assert selected.status_code == 200
+    assert selected.json()["submission_id"] == submission_id
+    assert len(client.get("/submissions/final-selections", headers=auth_header(student_token)).json()) == 1
+    assert client.post(
+        f"/submissions/{submission_id}/final-selection",
+        headers=auth_header(student_token),
+    ).status_code == 200
+
+
+def test_admin_ui_contract_lists_roster_and_manages_join_codes(client):
+    admin_token = login(client, "RootTA", "admin-password")
+    register_student(client)
+    roster = client.get("/admin/roster", headers=auth_header(admin_token))
+    assert roster.status_code == 200
+    assert roster.json()[0]["nickname"] == "NLPHero"
+
+    created = client.post(
+        "/admin/join-code",
+        headers=auth_header(admin_token),
+        json={"label": "Second code", "code": "SECOND-2026", "deactivate_existing": False},
+    )
+    assert created.status_code == 201
+    code_id = created.json()["id"]
+    listing = client.get("/admin/join-codes", headers=auth_header(admin_token))
+    assert listing.status_code == 200
+    assert any(row["id"] == code_id for row in listing.json())
+    deactivated = client.post(
+        f"/admin/join-codes/{code_id}/deactivate", headers=auth_header(admin_token)
+    )
+    assert deactivated.status_code == 200
+    assert deactivated.json()["is_active"] is False
+
+    student_token = login(client, "20260001", "student-password")
+    assert client.get("/admin/join-codes", headers=auth_header(student_token)).status_code == 403
 
 
 def test_baseline_practice_is_queued_without_consuming_official_attempt(

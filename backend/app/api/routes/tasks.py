@@ -6,7 +6,7 @@ from app.db.session import get_db
 from app.dependencies import require_admin
 from app.core.enums import EvaluationSplit, SubmissionStatus
 from app.models import Avatar, Score, Submission, Task, TaskConfig, User
-from app.schemas import LeaderboardRowOut, TaskCreateIn, TaskOut
+from app.schemas import LeaderboardRowOut, TaskCreateIn, TaskDetailOut, TaskOut
 from app.services.audit import write_audit
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -67,6 +67,14 @@ def create_task(
     return task
 
 
+@router.get("/{task_slug}", response_model=TaskDetailOut)
+def task_detail(task_slug: str, db: Session = Depends(get_db)) -> Task:
+    task = db.scalar(select(Task).where(Task.slug == task_slug, Task.is_public.is_(True)))
+    if task is None:
+        raise HTTPException(status_code=404, detail="태스크를 찾을 수 없습니다.")
+    return task
+
+
 @router.get("/{task_slug}/leaderboard", response_model=list[LeaderboardRowOut])
 def task_leaderboard(task_slug: str, db: Session = Depends(get_db)) -> list[LeaderboardRowOut]:
     task = db.scalar(
@@ -111,6 +119,8 @@ def task_leaderboard(task_slug: str, db: Session = Depends(get_db)) -> list[Lead
                 primary_metric=score.primary_metric,
                 primary_score=score.primary_score,
                 metrics=score.metrics,
+                model_name=submission.model_name,
+                submitted_at=submission.created_at,
             )
         )
         previous_score = score.primary_score
