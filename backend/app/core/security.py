@@ -3,7 +3,6 @@ import hashlib
 import hmac
 import json
 import os
-import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -64,14 +63,4 @@ def decode_access_token(token: str) -> str | None:
         return str(payload["sub"])
     except Exception:
         return None
-
-
-def constant_time_hash(value: str) -> str:
-    salt = b"join-code-v1"
-    return hashlib.pbkdf2_hmac("sha256", value.strip().encode("utf-8"), salt, 100_000).hex()
-
-
-def random_password(length: int = 14) -> str:
-    alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%"
-    return "".join(secrets.choice(alphabet) for _ in range(length))
 

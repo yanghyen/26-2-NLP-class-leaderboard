@@ -17,14 +17,18 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    from app.models import Base
+    from pathlib import Path
+    from runpy import run_path
+    Base = run_path(str(Path(__file__).parents[1] / "initial_schema.py"))["Base"]
 
     bind = op.get_bind()
     Base.metadata.create_all(bind=bind)
 
 
 def downgrade() -> None:
-    from app.models import Base
+    from pathlib import Path
+    from runpy import run_path
+    Base = run_path(str(Path(__file__).parents[1] / "initial_schema.py"))["Base"]
 
     bind = op.get_bind()
     Base.metadata.drop_all(bind=bind)

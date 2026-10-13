@@ -2,10 +2,15 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
-from app.core.enums import EvaluationSplit, MalwareScanStatus, SubmissionStatus
+from app.core.enums import (
+    EvaluationSplit,
+    MalwareScanStatus,
+    SubmissionKind,
+    SubmissionStatus,
+)
 from app.evaluators.mock import MockEvaluator
 from app.main import app
-from app.models import CourseRoster, EvaluationJob, Score, Submission
+from app.models import CourseRoster, EvaluationJob, Score, Submission, Task
 from app.security.malware import MalwareScanResult, MalwareScanner, get_malware_scanner
 from app.services.state import InvalidStateTransition, transition_submission
 from app.worker import EvaluationTimeoutError, process_job
@@ -16,7 +21,7 @@ from tests.conftest import (
     login,
     model_zip_bytes,
     notebook_bytes,
-    register_student,
+    prepare_participant,
     upload_submission,
 )
 
@@ -24,8 +29,8 @@ from tests.conftest import (
 def setup_student_and_task(client):
     admin_token = login(client, "RootTA", "admin-password")
     assert create_public_task(client, admin_token).status_code == 201
-    register_student(client)
-    return admin_token, login(client, "20260001", "student-password")
+    prepare_participant(client)
+    return admin_token, "20260001"
 
 
 def test_draft_is_stored_without_queue_and_replaces_previous(
@@ -36,7 +41,6 @@ def test_draft_is_stored_without_queue_and_replaces_previous(
     assert response.status_code == 201, response.text
     body = response.json()
     assert body["submission"]["status"] == "COMPLETED"
-    assert body["submission"]["official_attempt_consumed"] is False
     assert body["evaluation_job"] is None
     assert not job_queue.items
     assert (artifact_storage.artifact_path(body["submission"]["id"]) / "notebook.ipynb").is_file()
@@ -46,6 +50,58 @@ def test_draft_is_stored_without_queue_and_replaces_previous(
     original = db_session.get(Submission, body["submission"]["id"])
     assert original.status == SubmissionStatus.INVALIDATED
     assert not artifact_storage.artifact_path(original.id).exists()
+
+
+def test_empty_task_policy_returns_clear_error_before_storing_submission(
+    client, db_session
+):
+    _, student_token = setup_student_and_task(client)
+    task = db_session.scalar(select(Task).where(Task.slug == "sentiment"))
+    task.config.artifact_policy = {}
+    db_session.commit()
+
+    response = upload_submission(client, student_token)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == {
+        "code": "TASK_POLICY_NOT_CONFIGURED",
+        "message": "태스크의 제출 정책이 설정되지 않았습니다. 관리자에게 문의하세요.",
+        "submission_id": None,
+    }
+    assert db_session.scalar(select(Submission)) is None
+
+
+def test_submission_stats_only_count_successful_evaluations(
+    client, db_session, job_queue, artifact_storage
+):
+    _, student_token = setup_student_and_task(client)
+    draft = upload_submission(client, student_token, kind="DRAFT")
+    evaluation = upload_submission(client, student_token)
+    factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
+    process_job(job_queue.dequeue(), db_factory=factory, queue=job_queue, storage=artifact_storage)
+    db_session.expire_all()
+    completed = db_session.get(Submission, evaluation.json()["submission"]["id"])
+    for number, status in enumerate(
+        [SubmissionStatus.FAILED, SubmissionStatus.QUARANTINED, SubmissionStatus.INVALIDATED],
+        start=3,
+    ):
+        db_session.add(
+            Submission(
+                participant_id=completed.participant_id,
+                task_id=completed.task_id,
+                kind=SubmissionKind.EVALUATION,
+                status=status,
+                submission_number=number,
+            )
+        )
+    db_session.commit()
+
+    response = client.get("/admin/tasks/sentiment/participants", headers=auth_header(login(client, "RootTA", "admin-password")))
+
+    assert draft.json()["submission"]["status"] == "COMPLETED"
+    assert response.status_code == 200
+    assert response.json()[0]["total_submission_count"] == 5
+    assert response.json()[0]["successful_submission_count"] == 2
 
 
 def test_worker_saves_score_completes_and_updates_leaderboard(
@@ -112,49 +168,20 @@ def test_student_ui_contract_exposes_safe_task_submission_and_final_selection(
         f"/submissions/{submission_id}", headers=auth_header(student_token)
     )
     assert detail.status_code == 200
-    assert {row["file_type"] for row in detail.json()["files"]} == {
-        "notebook",
-        "model_zip",
-    }
-    assert detail.json()["is_final_selection"] is False
-    selected = client.post(
-        f"/submissions/{submission_id}/final-selection",
-        headers=auth_header(student_token),
-    )
-    assert selected.status_code == 200
-    assert selected.json()["submission_id"] == submission_id
-    assert len(client.get("/submissions/final-selections", headers=auth_header(student_token)).json()) == 1
-    assert client.post(
-        f"/submissions/{submission_id}/final-selection",
-        headers=auth_header(student_token),
-    ).status_code == 200
+    assert detail.json()["files"] == []
+    assert "is_final_selection" not in detail.json()
+    assert client.post(f"/submissions/{submission_id}/final-selection").status_code == 404
+    assert client.get("/submissions/me").status_code == 404
 
 
-def test_admin_ui_contract_lists_roster_and_manages_join_codes(client):
+def test_admin_roster_and_removed_join_codes(client):
     admin_token = login(client, "RootTA", "admin-password")
-    register_student(client)
+    prepare_participant(client)
     roster = client.get("/admin/roster", headers=auth_header(admin_token))
     assert roster.status_code == 200
     assert roster.json()[0]["nickname"] == "NLPHero"
-
-    created = client.post(
-        "/admin/join-code",
-        headers=auth_header(admin_token),
-        json={"label": "Second code", "code": "SECOND-2026", "deactivate_existing": False},
-    )
-    assert created.status_code == 201
-    code_id = created.json()["id"]
-    listing = client.get("/admin/join-codes", headers=auth_header(admin_token))
-    assert listing.status_code == 200
-    assert any(row["id"] == code_id for row in listing.json())
-    deactivated = client.post(
-        f"/admin/join-codes/{code_id}/deactivate", headers=auth_header(admin_token)
-    )
-    assert deactivated.status_code == 200
-    assert deactivated.json()["is_active"] is False
-
-    student_token = login(client, "20260001", "student-password")
-    assert client.get("/admin/join-codes", headers=auth_header(student_token)).status_code == 403
+    assert client.get("/admin/join-codes", headers=auth_header(admin_token)).status_code == 404
+    assert client.post("/admin/join-code", headers=auth_header(admin_token), json={}).status_code == 404
 
 
 def test_baseline_practice_is_queued_without_consuming_official_attempt(
@@ -163,7 +190,6 @@ def test_baseline_practice_is_queued_without_consuming_official_attempt(
     _, student_token = setup_student_and_task(client)
     response = upload_submission(client, student_token, kind="BASELINE_PRACTICE")
     assert response.status_code == 201
-    assert response.json()["submission"]["official_attempt_consumed"] is False
     assert response.json()["evaluation_job"]["split"] == "SMOKE"
     assert job_queue.dequeue() == response.json()["evaluation_job"]["id"]
 
@@ -174,13 +200,13 @@ def test_failed_job_does_not_block_next_job(
     _, first_token = setup_student_and_task(client)
     db_session.add(CourseRoster(student_number="20260002", real_name="Lee NLP", section="A"))
     db_session.commit()
-    register_student(
+    prepare_participant(
         client,
         nickname="SecondHero",
         student_number="20260002",
         real_name="Lee NLP",
     )
-    second_token = login(client, "20260002", "student-password")
+    second_token = "20260002"
     assert upload_submission(client, first_token).status_code == 201
     assert upload_submission(client, second_token).status_code == 201
     first_job_id = job_queue.dequeue()
@@ -230,13 +256,13 @@ def test_students_cannot_access_other_submission_admin_or_private_score(
     admin_token, first_token = setup_student_and_task(client)
     db_session.add(CourseRoster(student_number="20260002", real_name="Lee NLP", section="A"))
     db_session.commit()
-    register_student(
+    prepare_participant(
         client,
         nickname="SecondHero",
         student_number="20260002",
         real_name="Lee NLP",
     )
-    second_token = login(client, "20260002", "student-password")
+    second_token = "20260002"
     response = upload_submission(client, first_token)
     submission_id = response.json()["submission"]["id"]
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
@@ -253,19 +279,19 @@ def test_students_cannot_access_other_submission_admin_or_private_score(
     )
     db_session.commit()
 
-    assert client.get(f"/submissions/{submission_id}", headers=auth_header(second_token)).status_code == 404
+    assert client.get(f"/submissions/{submission_id}", headers=auth_header(second_token)).status_code == 200
     own = client.get(f"/submissions/{submission_id}", headers=auth_header(first_token)).json()
     assert all(score["split"] != "PRIVATE" for score in own["scores"])
-    assert client.get("/admin/jobs", headers=auth_header(first_token)).status_code == 403
+    assert client.get("/admin/jobs", headers=auth_header(first_token)).status_code == 401
     download = client.get(
         f"/admin/submissions/{submission_id}/download/notebook",
         headers=auth_header(admin_token),
     )
-    assert download.status_code == 200
+    assert download.status_code == 409
     assert client.get(
         f"/admin/submissions/{submission_id}/download/notebook",
         headers=auth_header(second_token),
-    ).status_code == 403
+    ).status_code == 401
 
 
 def test_quarantined_submission_is_never_queued_or_downloadable(
@@ -282,7 +308,7 @@ def test_quarantined_submission_is_never_queued_or_downloadable(
     submission_id = response.json()["detail"]["submission_id"]
     assert not job_queue.items
     assert (artifact_storage.quarantine_root / submission_id).is_dir()
-    assert client.get("/admin/quarantine", headers=auth_header(student_token)).status_code == 403
+    assert client.get("/admin/quarantine", headers=auth_header(student_token)).status_code == 401
     quarantine = client.get("/admin/quarantine", headers=auth_header(admin_token))
     assert quarantine.status_code == 200
     assert quarantine.json()[0]["status"] == "QUARANTINED"

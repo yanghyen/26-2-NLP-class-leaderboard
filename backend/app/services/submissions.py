@@ -1,14 +1,16 @@
 import hashlib
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.core.enums import EvaluationSplit, MalwareScanStatus, SubmissionKind, SubmissionStatus
-from app.models import EvaluationJob, Submission, SubmissionFile, Task, User
+from app.models import EvaluationJob, Submission, SubmissionFile, Task, Participant
 from app.queue import JobQueue, QueueUnavailableError
 from app.schemas import SubmissionCreateIn
 from app.security.malware import MalwareScanner
@@ -21,6 +23,10 @@ from app.security.validation import (
 from app.services.audit import write_audit
 from app.services.state import transition_job, transition_submission
 from app.storage.base import ArtifactStorage, UploadTooLargeError
+from app.task_policy import is_submission_policy_configured
+from app.evaluators.errors import EvaluatorError
+from app.evaluators.registry import get_evaluator
+from app.evaluators.lab02_policy import validate_task_config
 
 logger = logging.getLogger(__name__)
 
@@ -36,19 +42,10 @@ class SubmissionUploadError(SubmissionError):
         super().__init__(message)
 
 
-PENDING_STATUSES = {
-    SubmissionStatus.UPLOADING,
-    SubmissionStatus.VALIDATING,
-    SubmissionStatus.QUEUED,
-    SubmissionStatus.RUNNING,
-    SubmissionStatus.SCORING,
-}
-
-
 async def create_submission_from_upload(
     db: Session,
     *,
-    user: User,
+    participant: Participant,
     task: Task,
     payload: SubmissionCreateIn,
     notebook: UploadFile,
@@ -58,17 +55,27 @@ async def create_submission_from_upload(
     queue: JobQueue,
 ) -> tuple[Submission, EvaluationJob | None]:
     _check_upload_names(notebook, model_zip)
-    _ensure_submission_allowed(db, user=user, task=task, kind=payload.kind)
+    _ensure_submission_allowed(task)
+    _ensure_task_policy_configured(task)
+    if payload.kind != SubmissionKind.DRAFT:
+        try:
+            get_evaluator(task.evaluator_key)
+            if task.evaluator_key == "lab02_sentiment_v1":
+                validate_task_config(task.config.dataset_config, task.config.metric_config,
+                                     task.config.allowed_models, task.config.artifact_policy)
+        except EvaluatorError as exc:
+            raise SubmissionUploadError(exc.code, str(exc)) from exc
+    db.scalar(select(Participant).where(Participant.id == participant.id).with_for_update())
     next_number = int(
         db.scalar(
             select(func.max(Submission.submission_number)).where(
-                Submission.user_id == user.id, Submission.task_id == task.id
+                Submission.participant_id == participant.id, Submission.task_id == task.id
             )
         )
         or 0
     ) + 1
     submission = Submission(
-        user_id=user.id,
+        participant_id=participant.id,
         task_id=task.id,
         kind=payload.kind,
         status=SubmissionStatus.UPLOADING,
@@ -79,8 +86,17 @@ async def create_submission_from_upload(
         metadata_json=payload.metadata_json,
         official_attempt_consumed=False,
     )
-    db.add(submission)
-    db.commit()
+    for attempt in range(3):
+        db.add(submission)
+        try:
+            db.commit()
+            break
+        except IntegrityError:
+            db.rollback()
+            if attempt == 2:
+                raise SubmissionError("동시 제출 처리 중입니다. 잠시 후 다시 제출하세요.")
+            submission.submission_number = int(db.scalar(select(func.max(Submission.submission_number)).where(
+                Submission.participant_id == participant.id, Submission.task_id == task.id)) or 0) + 1
     db.refresh(submission)
 
     staging_id, staging_path = storage.create_staging_dir()
@@ -107,6 +123,7 @@ async def create_submission_from_upload(
             max_uncompressed_bytes=task.max_zip_bytes,
             allowed_models=task.config.allowed_models,
             artifact_policy=task.config.artifact_policy,
+            contract_key=task.evaluator_key if task.evaluator_key == "lab02_sentiment_v1" else None,
         )
         scan_result = scanner.scan([notebook_path, archive_path])
         submission.malware_scan_status = scan_result.status.value
@@ -118,7 +135,7 @@ async def create_submission_from_upload(
             submission.validation_report = {"error_code": "MALWARE_DETECTED"}
             write_audit(
                 db,
-                actor=user,
+                actor=None,
                 action="submission.quarantined",
                 target_type="submission",
                 target_id=submission.id,
@@ -173,7 +190,7 @@ async def create_submission_from_upload(
                 else EvaluationSplit.PUBLIC
             )
             transition_submission(submission, SubmissionStatus.QUEUED)
-            submission.official_attempt_consumed = payload.kind == SubmissionKind.EVALUATION
+            submission.official_attempt_consumed = False
             job = EvaluationJob(
                 submission_id=submission.id,
                 split=split,
@@ -199,7 +216,7 @@ async def create_submission_from_upload(
                     "EVALUATION_FAILED", job.safe_error_message, submission.id
                 ) from exc
         if payload.kind == SubmissionKind.DRAFT:
-            _invalidate_old_drafts(db, user=user, task=task, keep=submission, storage=storage)
+            _invalidate_old_drafts(db, participant=participant, task=task, keep=submission, storage=storage)
         return submission, job
     except SubmissionUploadError:
         raise
@@ -217,30 +234,24 @@ async def create_submission_from_upload(
         ) from exc
 
 
-def _ensure_submission_allowed(
-    db: Session, *, user: User, task: Task, kind: SubmissionKind
-) -> None:
-    if kind != SubmissionKind.DRAFT:
-        pending = db.scalar(
-            select(Submission).where(
-                Submission.user_id == user.id,
-                Submission.task_id == task.id,
-                Submission.kind != SubmissionKind.DRAFT,
-                Submission.status.in_(PENDING_STATUSES),
-            )
+def _ensure_submission_allowed(task: Task) -> None:
+    from app.services.results import utc_time
+    now = datetime.now(UTC)
+    if task.opens_at and now < utc_time(task.opens_at):
+        raise SubmissionError("제출 기간이 시작되지 않았습니다.")
+    deadline = task.dev_deadline or task.final_deadline
+    if deadline and now > utc_time(deadline):
+        raise SubmissionError("제출 기간이 종료되었습니다.")
+
+
+def _ensure_task_policy_configured(task: Task) -> None:
+    if not is_submission_policy_configured(
+        task.config.allowed_models, task.config.artifact_policy
+    ):
+        raise SubmissionUploadError(
+            "TASK_POLICY_NOT_CONFIGURED",
+            "태스크의 제출 정책이 설정되지 않았습니다. 관리자에게 문의하세요.",
         )
-        if pending is not None:
-            raise SubmissionError("이미 대기 중이거나 실행 중인 제출이 있습니다.")
-    if kind == SubmissionKind.EVALUATION:
-        consumed = db.scalar(
-            select(func.count()).select_from(Submission).where(
-                Submission.user_id == user.id,
-                Submission.task_id == task.id,
-                Submission.official_attempt_consumed.is_(True),
-            )
-        )
-        if int(consumed or 0) >= task.max_official_submissions:
-            raise SubmissionError("공식 제출 가능 횟수를 모두 사용했습니다.")
 
 
 def _check_upload_names(notebook: UploadFile, model_zip: UploadFile) -> None:
@@ -275,7 +286,7 @@ def _mark_validation_failed(
     current.official_attempt_consumed = False
     write_audit(
         db,
-        actor=current.user,
+        actor=None,
         action="submission.validation_failed",
         target_type="submission",
         target_id=current.id,
@@ -287,14 +298,14 @@ def _mark_validation_failed(
 def _invalidate_old_drafts(
     db: Session,
     *,
-    user: User,
+    participant: Participant,
     task: Task,
     keep: Submission,
     storage: ArtifactStorage,
 ) -> None:
     old_drafts = db.scalars(
         select(Submission).where(
-            Submission.user_id == user.id,
+            Submission.participant_id == participant.id,
             Submission.task_id == task.id,
             Submission.kind == SubmissionKind.DRAFT,
             Submission.id != keep.id,

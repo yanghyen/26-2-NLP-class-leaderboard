@@ -1,6 +1,7 @@
 import logging
 import socket
 import time
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Callable
 
@@ -8,10 +9,12 @@ from sqlalchemy.orm import Session
 
 from app.core.enums import SubmissionStatus
 from app.db.session import SessionLocal
-from app.evaluators.base import EvaluationContext, Evaluator
+from app.evaluators.base import EvaluationContext, EvaluationRequest, Evaluator
+from app.evaluators.errors import EvaluatorError
 from app.evaluators.registry import get_evaluator
 from app.models import EvaluationJob, Score
 from app.queue import JobQueue, QueueUnavailableError, RedisJobQueue
+from app.services.artifact_cleanup import cleanup_successful_artifacts, cleanup_successful_submission
 from app.services.state import transition_job, transition_submission
 from app.storage import LocalArtifactStorage
 from app.storage.base import ArtifactStorage
@@ -55,11 +58,17 @@ def process_job(
         db.commit()
 
         started = time.monotonic()
-        storage.create_work_dir(job.id)
+        work_path = storage.create_work_dir(job.id)
         work_created = True
         artifact_path = storage.artifact_path(submission.id)
         if not artifact_path.is_dir():
             raise StudentArtifactError("validated artifact is missing")
+
+        def enter_scoring() -> None:
+            transition_job(job, SubmissionStatus.SCORING)
+            transition_submission(submission, SubmissionStatus.SCORING)
+            db.commit()
+
         context = EvaluationContext(
             task_slug=task.slug,
             split=job.split.value,
@@ -68,39 +77,73 @@ def process_job(
             allowed_models=task.config.allowed_models,
             metric_config=task.config.metric_config,
             artifact_digest=submission.artifact_digest,
+            check_timeout=lambda: _check_timeout(started, task.timeout_seconds),
+            on_scoring=enter_scoring,
+            work_dir=work_path,
+            deadline_monotonic=started + task.timeout_seconds,
+        )
+        metadata = deepcopy(submission.validation_report)
+        model_metadata = metadata.get("model", {})
+        manifest = model_metadata.get("manifest", {
+            "base_model": model_metadata.get("base_model")
+        })
+        request = EvaluationRequest(
+            submission_id=submission.id,
+            task_id=task.id,
+            evaluator_key=task.evaluator_key,
+            artifact_path=artifact_path / "model_artifact",
+            validated_manifest=manifest,
+            validated_metadata=metadata,
+            context=context,
         )
         evaluator = evaluator_factory(task.evaluator_key)
         try:
-            evaluator.validate_submission(context)
-            prepared = evaluator.prepare(context)
-            predictions = evaluator.run_inference(context, prepared)
+            result = evaluator.evaluate(request)
             _check_timeout(started, task.timeout_seconds)
-            transition_job(job, SubmissionStatus.SCORING)
-            transition_submission(submission, SubmissionStatus.SCORING)
-            db.commit()
-            result = evaluator.format_result(evaluator.compute_metrics(context, predictions))
-            _check_timeout(started, task.timeout_seconds)
+            if job.status == SubmissionStatus.RUNNING:
+                # A one-shot evaluator may return without an intermediate phase callback.
+                enter_scoring()
             db.add(
                 Score(
                     submission_id=submission.id,
                     split=job.split,
-                    primary_metric=str(result["primary_metric"]),
-                    primary_score=float(result["primary_score"]),
-                    metrics=dict(result.get("metrics", {})),
+                    primary_metric=result.primary_metric,
+                    primary_score=result.primary_score,
+                    metrics=result.secondary_metrics,
                     visible_to_student=job.split.value != "PRIVATE",
                 )
             )
             transition_job(job, SubmissionStatus.COMPLETED)
             transition_submission(submission, SubmissionStatus.COMPLETED)
             submission.completed_at = datetime.now(UTC)
+            submission.evaluator_version = result.evaluator_version
+            submission.dataset_version = result.dataset_version
+            if result.evaluation_metadata:
+                submission.validation_report = {**submission.validation_report, "evaluation": result.evaluation_metadata}
+            submission.artifact_cleanup_status = "pending"
             job.error_kind = None
             job.safe_error_message = None
+            submission.safe_error_message = None
+            from app.services.results import pin_baseline
+            pin_baseline(db, submission)
             db.commit()
+            # Separate transaction; cleanup errors must never enter evaluation retry handling.
+            try:
+                cleanup_successful_submission(
+                    submission.id, db_factory=db_factory, storage=storage
+                )
+            except Exception:
+                logger.exception("Post-commit artifact cleanup failed: submission_id=%s", submission.id)
         finally:
             try:
-                evaluator.cleanup(context)
+                evaluator.cleanup(request)
             except Exception:
                 logger.exception("Evaluator cleanup failed: job_id=%s", job_id)
+    except EvaluatorError as exc:
+        db.rollback()
+        current = db.get(EvaluationJob, job_id)
+        if current is not None:
+            _fail_without_retry(db, current, exc.code, str(exc))
     except (StudentArtifactError, EvaluationTimeoutError, KeyError, ValueError) as exc:
         db.rollback()
         current = db.get(EvaluationJob, job_id)
@@ -130,8 +173,12 @@ def run_worker_forever() -> None:
     storage = LocalArtifactStorage()
     worker_id = socket.gethostname()
     logger.info("Evaluation worker started with concurrency=1 worker_id=%s", worker_id)
+    next_cleanup = 0.0
     while True:
         try:
+            if time.monotonic() >= next_cleanup:
+                cleanup_successful_artifacts(storage=storage)
+                next_cleanup = time.monotonic() + 30
             job_id = queue.dequeue(timeout=5)
             if job_id:
                 process_job(job_id, queue=queue, storage=storage, worker_id=worker_id)
@@ -168,6 +215,8 @@ def _retry_or_fail_server_error(
     db: Session, job: EvaluationJob, queue: JobQueue, internal_error: str
 ) -> None:
     submission = job.submission
+    if job.status == SubmissionStatus.COMPLETED:
+        return
     if job.attempts < job.max_attempts and job.status in {
         SubmissionStatus.RUNNING,
         SubmissionStatus.SCORING,

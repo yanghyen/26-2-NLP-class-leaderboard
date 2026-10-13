@@ -24,7 +24,7 @@ SUBMISSION_TRANSITIONS: dict[SubmissionStatus, set[SubmissionStatus]] = {
         SubmissionStatus.SCORING,
         SubmissionStatus.FAILED,
     },
-    SubmissionStatus.SCORING: {SubmissionStatus.COMPLETED, SubmissionStatus.FAILED},
+    SubmissionStatus.SCORING: {SubmissionStatus.COMPLETED, SubmissionStatus.FAILED, SubmissionStatus.QUEUED},
     SubmissionStatus.COMPLETED: {SubmissionStatus.INVALIDATED},
     SubmissionStatus.FAILED: {SubmissionStatus.QUEUED, SubmissionStatus.INVALIDATED},
     SubmissionStatus.QUARANTINED: {SubmissionStatus.INVALIDATED},
@@ -38,7 +38,7 @@ JOB_TRANSITIONS: dict[SubmissionStatus, set[SubmissionStatus]] = {
         SubmissionStatus.SCORING,
         SubmissionStatus.FAILED,
     },
-    SubmissionStatus.SCORING: {SubmissionStatus.COMPLETED, SubmissionStatus.FAILED},
+    SubmissionStatus.SCORING: {SubmissionStatus.COMPLETED, SubmissionStatus.FAILED, SubmissionStatus.QUEUED},
     SubmissionStatus.FAILED: {SubmissionStatus.QUEUED},
     SubmissionStatus.COMPLETED: set(),
 }

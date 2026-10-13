@@ -71,6 +71,24 @@ class CourseRoster(Base, TimestampMixin):
     registered_user: Mapped[User | None] = relationship()
 
 
+class Participant(Base, TimestampMixin):
+    __tablename__ = "participants"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    roster_entry_id: Mapped[str] = mapped_column(ForeignKey("course_roster.id"), unique=True, nullable=False)
+    nickname: Mapped[str] = mapped_column(String(16), nullable=False)
+    emoji: Mapped[str] = mapped_column(String(16), nullable=False)
+    roster_entry: Mapped[CourseRoster] = relationship()
+
+
+class BaselineReference(Base):
+    __tablename__ = "baseline_references"
+    __table_args__ = (UniqueConstraint("participant_id", "task_id", name="uq_baseline_reference"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    participant_id: Mapped[str] = mapped_column(ForeignKey("participants.id"), nullable=False)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), nullable=False)
+    submission_id: Mapped[str] = mapped_column(ForeignKey("submissions.id"), nullable=False)
+
+
 class JoinCode(Base, TimestampMixin):
     __tablename__ = "join_codes"
 
@@ -97,7 +115,7 @@ class Task(Base, TimestampMixin):
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=900, nullable=False)
     public_leaderboard_visible: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     private_leaderboard_visible: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    evaluator_key: Mapped[str] = mapped_column(String(80), default="mock", nullable=False)
+    evaluator_key: Mapped[str] = mapped_column(String(80), default="mock_v1", nullable=False)
 
     config: Mapped["TaskConfig"] = relationship(back_populates="task", cascade="all, delete-orphan")
 
@@ -120,11 +138,12 @@ class TaskConfig(Base, TimestampMixin):
 class Submission(Base, TimestampMixin):
     __tablename__ = "submissions"
     __table_args__ = (
-        UniqueConstraint("user_id", "task_id", "submission_number", name="uq_submission_number_per_task"),
+        UniqueConstraint("participant_id", "task_id", "submission_number", name="uq_participant_submission_number"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    participant_id: Mapped[str | None] = mapped_column(ForeignKey("participants.id"))
     task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), nullable=False)
     kind: Mapped[SubmissionKind] = mapped_column(Enum(SubmissionKind), nullable=False)
     status: Mapped[SubmissionStatus] = mapped_column(
@@ -142,8 +161,15 @@ class Submission(Base, TimestampMixin):
     safe_error_message: Mapped[str | None] = mapped_column(Text)
     internal_error_message: Mapped[str | None] = mapped_column(Text)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    artifact_cleanup_status: Mapped[str] = mapped_column(
+        String(16), default="retained", server_default="retained", nullable=False, index=True
+    )
+    artifact_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    evaluator_version: Mapped[str | None] = mapped_column(String(120))
+    dataset_version: Mapped[str | None] = mapped_column(Text)
 
-    user: Mapped[User] = relationship()
+    user: Mapped[User | None] = relationship()
+    participant: Mapped[Participant | None] = relationship()
     task: Mapped[Task] = relationship()
 
 

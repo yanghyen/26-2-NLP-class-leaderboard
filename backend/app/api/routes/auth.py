@@ -5,10 +5,10 @@ from app.core.security import create_access_token
 from app.db.session import get_db
 from app.dependencies import get_current_user
 from app.models import User
-from app.schemas import ErrorResponse, LoginIn, RegisterIn, TokenOut, UserOut
-from app.services.registration import RegistrationError, authenticate_user, register_student
+from app.schemas import ErrorResponse, LoginIn, TokenOut, UserOut
+from app.services.registration import authenticate_user
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["admin authentication"])
 
 
 def to_user_out(user: User) -> UserOut:
@@ -22,15 +22,6 @@ def to_user_out(user: User) -> UserOut:
         real_name=user.real_name,
         password_reset_required=user.password_reset_required,
     )
-
-
-@router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterIn, db: Session = Depends(get_db)) -> UserOut:
-    try:
-        user = register_student(db, payload)
-    except RegistrationError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    return to_user_out(user)
 
 
 @router.post(
