@@ -8,8 +8,17 @@ from app.models import Task, TaskConfig, User
 from app.schemas import LeaderboardRowOut, TaskCreateIn, TaskDetailOut, TaskOut, TaskUpdateIn, PublicTaskDetailOut, PublicTaskOut
 from app.services.audit import write_audit
 from app.services.results import task_results
+from app.evaluators.errors import EvaluatorError
+from app.evaluators.registry import get_evaluator
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+
+def validate_evaluator_selection(key: object) -> str:
+    try:
+        return get_evaluator(key).key
+    except EvaluatorError as exc:
+        raise HTTPException(status_code=400, detail={"code": exc.code, "message": str(exc)}) from exc
 
 
 @router.get("", response_model=list[PublicTaskOut])
@@ -43,6 +52,7 @@ def create_task(
     db: Session = Depends(get_db),
     actor: User = Depends(require_admin),
 ) -> Task:
+    evaluator_key = validate_evaluator_selection(payload.evaluator_key)
     if db.scalar(select(Task).where(Task.slug == payload.slug)):
         raise HTTPException(status_code=400, detail="이미 존재하는 태스크 slug입니다.")
     task = Task(
@@ -54,7 +64,7 @@ def create_task(
         max_official_submissions=payload.max_official_submissions,
         max_zip_bytes=payload.max_zip_bytes,
         timeout_seconds=payload.timeout_seconds,
-        evaluator_key=payload.evaluator_key,
+        evaluator_key=evaluator_key,
         opens_at=payload.opens_at, dev_deadline=payload.dev_deadline, final_deadline=payload.final_deadline,
     )
     task.config = TaskConfig(
@@ -73,7 +83,7 @@ def create_task(
         action="task.created",
         target_type="task",
         target_id=task.id,
-        after={"slug": task.slug, "stage": task.stage},
+        after={"slug": task.slug, "stage": task.stage, "evaluator_key": task.evaluator_key},
     )
     db.commit()
     db.refresh(task)
@@ -91,7 +101,11 @@ def update_task(
     if task is None:
         raise HTTPException(status_code=404, detail="태스크를 찾을 수 없습니다.")
 
+    evaluator_key = validate_evaluator_selection(
+        payload.evaluator_key if "evaluator_key" in payload.model_fields_set else task.evaluator_key
+    )
     before = {
+        "evaluator_key": task.evaluator_key,
         "title": task.title,
         "stage": task.stage.value,
         "is_public": task.is_public,
@@ -100,6 +114,7 @@ def update_task(
     }
     for field, value in payload.model_dump(exclude_unset=True, exclude={"config"}).items():
         setattr(task, field, value)
+    task.evaluator_key = evaluator_key
     if payload.config is not None:
         config_values = payload.config.model_dump(exclude_unset=True)
         if payload.config.artifact_policy is not None:
@@ -117,6 +132,7 @@ def update_task(
         target_id=task.id,
         before=before,
         after={
+            "evaluator_key": task.evaluator_key,
             "title": task.title,
             "stage": task.stage.value,
             "is_public": task.is_public,

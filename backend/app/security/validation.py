@@ -12,6 +12,8 @@ from typing import Any
 from safetensors import safe_open
 
 from app.core.config import Settings
+from app.evaluators.errors import SAFE_EVALUATOR_MESSAGES, EvaluatorError
+from app.evaluators.lab02_contract import LAB02_CONTRACT, validate_lab02_contract
 
 
 DEFAULT_ALLOWED_PATHS = {
@@ -54,6 +56,7 @@ DTYPE_BYTES = {
     "F16": 2, "BF16": 2, "F32": 4, "F64": 8,
 }
 SAFE_ERROR_MESSAGES = {
+    **SAFE_EVALUATOR_MESSAGES,
     "INVALID_ARCHIVE": "모델 ZIP 형식이 올바르지 않습니다.",
     "UNSUPPORTED_FILE": "허용되지 않은 파일이 포함되어 있습니다.",
     "INVALID_MODEL_FORMAT": "모델 artifact 형식이 올바르지 않습니다.",
@@ -139,9 +142,15 @@ def validate_and_extract_model_zip(
     max_uncompressed_bytes: int,
     allowed_models: list[str],
     artifact_policy: dict[str, Any],
+    contract_key: str | None = None,
 ) -> tuple[dict[str, int], dict[str, Any]]:
+    if contract_key not in {None, LAB02_CONTRACT.key}:
+        raise ArtifactValidationError("EVALUATOR_CONFIG_INVALID", "Unknown artifact contract")
+    is_lab02 = contract_key == LAB02_CONTRACT.key
     _validate_zip_envelope(archive_path)
-    allowed_paths = set(artifact_policy.get("allowed_paths") or DEFAULT_ALLOWED_PATHS)
+    allowed_paths = set(LAB02_CONTRACT.allowed_files) if is_lab02 else set(
+        artifact_policy.get("allowed_paths") or DEFAULT_ALLOWED_PATHS
+    )
     allowed_architectures = set(artifact_policy.get("allowed_architectures") or [])
     allowed_dtypes = set(artifact_policy.get("allowed_dtypes") or ALLOWED_DTYPES)
     seen: set[str] = set()
@@ -159,7 +168,11 @@ def validate_and_extract_model_zip(
                 raise ArtifactValidationError("INVALID_ARCHIVE", "Duplicate or case-colliding path")
             seen.add(collision_key)
             if info.is_dir():
+                if is_lab02:
+                    raise ArtifactValidationError("LAB02_MANIFEST_INVALID", "Lab02 requires top-level files only")
                 continue
+            if is_lab02 and normalized not in allowed_paths:
+                raise ArtifactValidationError("LAB02_MANIFEST_INVALID", "Unexpected Lab02 artifact file")
             _validate_allowed_path(normalized, allowed_paths)
             total_expected += info.file_size
             if total_expected > max_uncompressed_bytes:
@@ -170,9 +183,12 @@ def validate_and_extract_model_zip(
             infos.append(info)
         if len(infos) > settings.max_archive_files:
             raise ArtifactValidationError("MODEL_TOO_LARGE", "Archive file count exceeds limit")
-        if "submission.json" not in {info.filename.replace("\\", "/") for info in infos}:
+        names = {info.filename for info in infos}
+        if is_lab02 and names != allowed_paths:
+            raise ArtifactValidationError("LAB02_MANIFEST_INVALID", "Required Lab02 files are missing")
+        if not is_lab02 and "submission.json" not in names:
             raise ArtifactValidationError("INVALID_MODEL_FORMAT", "submission.json is required")
-        if "model/config.json" not in {info.filename.replace("\\", "/") for info in infos}:
+        if not is_lab02 and "model/config.json" not in names:
             raise ArtifactValidationError("INVALID_MODEL_FORMAT", "model/config.json is required")
         if not any(info.filename.endswith(".safetensors") for info in infos):
             raise ArtifactValidationError("INVALID_MODEL_FORMAT", "At least one safetensors file is required")
@@ -183,14 +199,26 @@ def validate_and_extract_model_zip(
 
     for path in extracted:
         _reject_disguised_executable(path)
-    submission = _load_safe_json(extract_root / "submission.json", settings)
-    config = _load_safe_json(extract_root / "model/config.json", settings)
+    submission_name = "manifest.json" if is_lab02 else "submission.json"
+    config_name = "config.json" if is_lab02 else "model/config.json"
+
+    def load_metadata(name: str, code: str) -> dict[str, Any]:
+        try:
+            return _load_safe_json(extract_root / name, settings)
+        except ArtifactValidationError as exc:
+            if is_lab02:
+                raise ArtifactValidationError(code, exc.internal_detail) from exc
+            raise
+
+    submission = load_metadata(submission_name, "LAB02_MANIFEST_INVALID")
+    config = load_metadata(config_name, "LAB02_CONFIG_INVALID")
     parsed_json: dict[str, dict[str, Any]] = {}
     for json_path in extract_root.rglob("*.json"):
         parsed_json[json_path.relative_to(extract_root).as_posix()] = _load_safe_json(
             json_path, settings
         )
-    _validate_model_config(config, submission, allowed_models, allowed_architectures)
+    if not is_lab02:
+        _validate_model_config(config, submission, allowed_models, allowed_architectures)
     tensor_count = 0
     tensor_bytes = 0
     tensor_names: set[str] = set()
@@ -213,6 +241,17 @@ def validate_and_extract_model_zip(
         tensor_names,
         extract_root,
     )
+    if is_lab02:
+        try:
+            manifest = validate_lab02_contract(
+                submission, config, [info.filename for info in infos],
+                safetensors_validated=True, settings=settings,
+            )
+        except EvaluatorError as exc:
+            raise ArtifactValidationError(exc.code, "Lab02 metadata conflicts with contract") from exc
+    else:
+        # Persist only bounded, allowlisted manifest fields rather than arbitrary student data.
+        manifest = {"base_model": submission["base_model"]}
     return (
         {"files": len(infos), "uncompressed_bytes": total_expected},
         {
@@ -221,6 +260,8 @@ def validate_and_extract_model_zip(
             "tensor_count": tensor_count,
             "tensor_bytes": tensor_bytes,
             "trust_remote_code": False,
+            "manifest": manifest,
+            "safetensors_validated": True,
         },
     )
 
@@ -325,6 +366,11 @@ def _load_safe_json(path: Path, settings: Settings) -> dict[str, Any]:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ArtifactValidationError("INVALID_MODEL_FORMAT", "Invalid JSON artifact") from exc
+    return validate_json_metadata(value, settings)
+
+
+def validate_json_metadata(value: Any, settings: Settings) -> dict[str, Any]:
+    """Shared data-only JSON checks, also usable for already parsed contract metadata."""
     if not isinstance(value, dict):
         raise ArtifactValidationError("INVALID_MODEL_FORMAT", "JSON artifact root must be an object")
     keys = 0

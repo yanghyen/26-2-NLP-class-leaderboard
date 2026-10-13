@@ -19,6 +19,7 @@ import type { TaskStage } from "../../../../lib/types";
 
 const initialCreate = {
   slug: "", title: "", description: "", stage: "DEVELOPMENT" as TaskStage,
+  evaluatorKey: "mock_v1",
   models: "course/bert-base",
   architectures: "BertForSequenceClassification", public: true
 };
@@ -51,7 +52,7 @@ export default function AdminTasksPage() {
         description: createForm.description,
         stage: createForm.stage,
         is_public: createForm.public,
-        evaluator_key: "mock",
+        evaluator_key: createForm.evaluatorKey,
         config: {
           allowed_models: models,
           artifact_policy: { allowed_architectures: architectures },
@@ -108,6 +109,7 @@ export default function AdminTasksPage() {
       <Field label="Slug"><input required pattern="[a-z0-9][a-z0-9-]{1,78}[a-z0-9]" className={inputClass} value={createForm.slug} onChange={(event) => setCreateForm({ ...createForm, slug: event.target.value })} /></Field>
       <Field label="제목"><input required className={inputClass} value={createForm.title} onChange={(event) => setCreateForm({ ...createForm, title: event.target.value })} /></Field>
       <Field label="Stage"><select className={inputClass} value={createForm.stage} onChange={(event) => setCreateForm({ ...createForm, stage: event.target.value as TaskStage })}>{Object.entries(STAGE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
+      <EvaluatorSelect value={createForm.evaluatorKey} onChange={(value) => setCreateForm({ ...createForm, evaluatorKey: value })} />
       <Field label="허용 base models" hint="쉼표로 구분"><input className={inputClass} value={createForm.models} onChange={(event) => setCreateForm({ ...createForm, models: event.target.value })} /></Field>
       <Field label="허용 architectures" hint="쉼표로 구분"><input className={inputClass} value={createForm.architectures} onChange={(event) => setCreateForm({ ...createForm, architectures: event.target.value })} /></Field>
       <div className="sm:col-span-2"><Field label="설명"><textarea className={inputClass} value={createForm.description} onChange={(event) => setCreateForm({ ...createForm, description: event.target.value })} /></Field></div>
@@ -118,6 +120,7 @@ export default function AdminTasksPage() {
       <div className="flex items-center justify-between sm:col-span-2"><div><h2 className="font-bold">{editSlug} 정책 수정</h2><p className="mt-1 text-xs text-zinc-500">Slug는 기존 제출 참조를 보호하기 위해 수정할 수 없습니다.</p></div><Button type="button" variant="ghost" title="편집 닫기" onClick={() => { setEditSlug(null); setEditForm(null); }}><X className="h-4 w-4" /></Button></div>
       <Field label="제목"><input required className={inputClass} value={editForm.title} onChange={(event) => setEditForm({ ...editForm, title: event.target.value })} /></Field>
       <Field label="Stage"><select className={inputClass} value={editForm.stage} onChange={(event) => setEditForm({ ...editForm, stage: event.target.value as TaskStage })}>{Object.entries(STAGE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
+      <EvaluatorSelect value={editForm.evaluatorKey} onChange={(value) => setEditForm({ ...editForm, evaluatorKey: value })} />
       <label className="flex items-end gap-2 pb-3 text-sm"><input type="checkbox" checked={editForm.isPublic} onChange={(event) => setEditForm({ ...editForm, isPublic: event.target.checked })} />학생에게 공개</label>
       <Field label="허용 base models" hint="필수, 쉼표로 구분"><input className={inputClass} value={editForm.models} onChange={(event) => setEditForm({ ...editForm, models: event.target.value })} /></Field>
       <Field label="허용 architectures" hint="필수, 쉼표로 구분"><input className={inputClass} value={editForm.architectures} onChange={(event) => setEditForm({ ...editForm, architectures: event.target.value })} /></Field>
@@ -133,4 +136,14 @@ export default function AdminTasksPage() {
       return <tr key={row.id}><td><strong>{row.title}</strong><br /><span className="font-mono text-xs text-zinc-500">{row.slug}</span></td><td>{STAGE_LABELS[row.stage]}</td><td>{row.is_public ? "공개" : "비공개"}</td><td>횟수 제한 없음</td><td>{formatBytes(row.max_zip_bytes)}</td><td>{emptyPolicy ? <span className="inline-flex items-center gap-1 text-sm font-semibold text-red-700"><AlertTriangle className="h-4 w-4" />정책 미설정</span> : <span className="text-sm text-emerald-700">설정됨</span>}{emptyPolicy && <p className="mt-1 max-w-xs text-xs text-red-700">정책이 없으면 모델 제출을 검증할 수 없습니다.</p>}</td><td><Button variant="secondary" onClick={() => void beginEdit(row.slug)}><Pencil className="h-4 w-4" />수정</Button></td></tr>;
     })}</tbody></table></div>
   </div>;
+}
+
+function EvaluatorSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return <Field label="Evaluator" hint="현재 Mock만 실행됩니다. Lab02 실제 평가는 아직 사용할 수 없습니다.">
+    <select aria-label="Evaluator" className={inputClass} value={value} onChange={(event) => onChange(event.target.value)}>
+      <option value="mock_v1">mock_v1 · deterministic Mock</option>
+      <option value="lab02_sentiment_v1" disabled>lab02_sentiment_v1 · 사용 불가</option>
+      {value !== "mock_v1" && value !== "lab02_sentiment_v1" && <option value={value} disabled>미지원 evaluator 설정</option>}
+    </select>
+  </Field>;
 }

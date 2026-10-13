@@ -45,6 +45,7 @@ describe("task policy editor", () => {
     expect(form.models).toBe("course/bert-base");
     expect(form.architectures).toBe("BertForSequenceClassification");
     expect(form.dtypes).toBe("F32");
+    expect(form.evaluatorKey).toBe("mock_v1");
   });
 
   it("validates required and duplicate policy entries before saving", () => {
@@ -64,6 +65,7 @@ describe("task policy editor", () => {
       architectures: "BertForSequenceClassificationV2"
     });
     expect(payload.config?.allowed_models).toEqual(["course/bert-v2"]);
+    expect(payload.evaluator_key).toBe("mock_v1");
     expect(payload.config?.artifact_policy?.allowed_architectures).toEqual([
       "BertForSequenceClassificationV2"
     ]);
@@ -74,5 +76,11 @@ describe("task policy editor", () => {
     expect(hasEmptySubmissionPolicy(task({
       allowed_architectures: ["BertForSequenceClassification"]
     }))).toBe(false);
+  });
+
+  it("rejects unavailable and unknown evaluator selections before saving", () => {
+    const form = taskPolicyForm(task({ allowed_architectures: ["BertForSequenceClassification"] }));
+    expect(validateTaskPolicyForm({ ...form, evaluatorKey: "lab02_sentiment_v1" })).toContain("mock_v1뿐");
+    expect(validateTaskPolicyForm({ ...form, evaluatorKey: "unknown" })).toContain("mock_v1뿐");
   });
 });

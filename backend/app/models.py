@@ -115,7 +115,7 @@ class Task(Base, TimestampMixin):
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=900, nullable=False)
     public_leaderboard_visible: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     private_leaderboard_visible: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    evaluator_key: Mapped[str] = mapped_column(String(80), default="mock", nullable=False)
+    evaluator_key: Mapped[str] = mapped_column(String(80), default="mock_v1", nullable=False)
 
     config: Mapped["TaskConfig"] = relationship(back_populates="task", cascade="all, delete-orphan")
 

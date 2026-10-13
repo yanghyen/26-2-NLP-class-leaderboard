@@ -97,7 +97,7 @@ class TaskCreateIn(BaseModel):
     max_official_submissions: int = Field(default=5, ge=0, le=100)
     max_zip_bytes: int = Field(default=500_000_000, ge=1_000_000)
     timeout_seconds: int = Field(default=900, ge=30)
-    evaluator_key: str = "mock"
+    evaluator_key: str = "mock_v1"
     opens_at: datetime | None = None
     dev_deadline: datetime | None = None
     final_deadline: datetime | None = None

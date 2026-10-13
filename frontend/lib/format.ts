@@ -73,6 +73,11 @@ export function statusTone(status: SubmissionStatus): "success" | "danger" | "ne
 }
 
 export const ERROR_MESSAGES: Record<string, string> = {
+  EVALUATOR_NOT_AVAILABLE: "아직 사용할 수 없는 evaluator입니다.",
+  UNKNOWN_EVALUATOR: "알 수 없는 evaluator 설정입니다.",
+  EVALUATOR_CONFIG_INVALID: "evaluator 설정이 올바르지 않습니다.",
+  LAB02_MANIFEST_INVALID: "Lab02 manifest 또는 파일 구성이 올바르지 않습니다.",
+  LAB02_CONFIG_INVALID: "Lab02 모델 config가 평가 규격과 일치하지 않습니다.",
   INVALID_NOTEBOOK: "Notebook 형식을 확인해 주세요.",
   INVALID_ARCHIVE: "모델 ZIP 형식이 올바르지 않습니다.",
   UNSUPPORTED_FILE: "ZIP에 허용되지 않은 파일이 포함되어 있습니다.",

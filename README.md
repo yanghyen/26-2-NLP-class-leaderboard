@@ -77,16 +77,17 @@ Admins create tasks through `POST /tasks` with a configurable evaluator key, dat
 
 ## Adding An Evaluator
 
-Implement `backend/app/evaluators/base.py`:
+Implement `Evaluator.evaluate(EvaluationRequest) -> EvaluationResult` in
+`backend/app/evaluators/base.py`. Requests are internal objects containing validated
+artifact metadata and paths; results contain score, secondary metrics and version
+snapshots. Only `mock_v1` is executable today; historical `mock` keys remain a
+compatibility alias. Task creation/update validates the explicit evaluator key.
 
-- `validate_submission()`
-- `load_model()`
-- `run_inference()`
-- `compute_metrics()`
-- `format_public_result()`
-- `cleanup()`
-
-Sentiment Analysis should be the first real evaluator. Machine Translation and Code Generation should reuse the same queue lifecycle while adding independent evaluator implementations.
+`lab02_sentiment_v1` has a data-only contract and validator, but is not registered
+as an evaluator. Its selection returns `EVALUATOR_NOT_AVAILABLE`. Real BERT/model
+loading, GPU inference, hidden data and isolated evaluator containers remain
+unimplemented. See `docs/evaluator-contract.md` for the interface and Lab02 ZIP
+format. The next step is an independent Lab02 evaluator implementation.
 
 ## Hidden Tests
 

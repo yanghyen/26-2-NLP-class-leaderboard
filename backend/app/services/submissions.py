@@ -24,6 +24,8 @@ from app.services.audit import write_audit
 from app.services.state import transition_job, transition_submission
 from app.storage.base import ArtifactStorage, UploadTooLargeError
 from app.task_policy import is_submission_policy_configured
+from app.evaluators.errors import EvaluatorError
+from app.evaluators.registry import get_evaluator
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,11 @@ async def create_submission_from_upload(
     _check_upload_names(notebook, model_zip)
     _ensure_submission_allowed(task)
     _ensure_task_policy_configured(task)
+    if payload.kind != SubmissionKind.DRAFT:
+        try:
+            get_evaluator(task.evaluator_key)
+        except EvaluatorError as exc:
+            raise SubmissionUploadError(exc.code, str(exc)) from exc
     db.scalar(select(Participant).where(Participant.id == participant.id).with_for_update())
     next_number = int(
         db.scalar(

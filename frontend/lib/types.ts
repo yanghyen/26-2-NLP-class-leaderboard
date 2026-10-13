@@ -161,6 +161,7 @@ export interface SubmissionCreateResponse {
 }
 
 export interface TaskUpdatePayload {
+  evaluator_key?: string;
   title?: string;
   description?: string;
   stage?: TaskStage;

@@ -5,6 +5,7 @@ export interface TaskPolicyForm {
   description: string;
   stage: TaskStage;
   isPublic: boolean;
+  evaluatorKey: string;
   models: string;
   architectures: string;
   paths: string;
@@ -21,6 +22,7 @@ export function taskPolicyForm(task: TaskDetail): TaskPolicyForm {
     description: task.description,
     stage: task.stage,
     isPublic: task.is_public,
+    evaluatorKey: task.evaluator_key === "mock" ? "mock_v1" : task.evaluator_key,
     models: task.config.allowed_models.join(", "),
     architectures: (task.config.artifact_policy.allowed_architectures ?? []).join(", "),
     paths: (task.config.artifact_policy.allowed_paths ?? []).join(", "),
@@ -36,6 +38,7 @@ export function validateTaskPolicyForm(form: TaskPolicyForm): string | null {
   const models = csvValues(form.models);
   const architectures = csvValues(form.architectures);
   if (!form.title.trim()) return "태스크 제목을 입력하세요.";
+  if (form.evaluatorKey !== "mock_v1") return "현재 사용할 수 있는 evaluator는 mock_v1뿐입니다.";
   if (!models.length) return "허용 base model을 하나 이상 입력하세요.";
   if (!architectures.length) return "허용 architecture를 하나 이상 입력하세요.";
   if ([models, architectures, csvValues(form.paths), csvValues(form.dtypes)].some(hasDuplicates)) {
@@ -52,6 +55,7 @@ export function taskUpdatePayload(form: TaskPolicyForm): TaskUpdatePayload {
     description: form.description,
     stage: form.stage,
     is_public: form.isPublic,
+    evaluator_key: form.evaluatorKey,
     config: {
       allowed_models: csvValues(form.models),
       artifact_policy: {

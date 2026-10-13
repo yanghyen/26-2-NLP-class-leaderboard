@@ -49,6 +49,14 @@ from fastapi.responses import JSONResponse
 
 @app.exception_handler(RequestValidationError)
 async def safe_request_validation(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith("/tasks") and any(
+        "evaluator_key" in error["loc"] for error in exc.errors()
+    ):
+        from app.evaluators.errors import SAFE_EVALUATOR_MESSAGES
+        code = "EVALUATOR_CONFIG_INVALID"
+        return JSONResponse(status_code=400, content={"detail": {
+            "code": code, "message": SAFE_EVALUATOR_MESSAGES[code],
+        }})
     if request.url.path.startswith("/submissions"):
         return JSONResponse(status_code=422, content={"detail": "제출 입력 형식을 확인하세요."})
     return await request_validation_exception_handler(request, exc)

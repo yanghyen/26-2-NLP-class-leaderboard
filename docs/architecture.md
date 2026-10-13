@@ -34,16 +34,17 @@ Private identifiers are not needed for leaderboard views. Leaderboards should jo
 
 ## Task Extension Strategy
 
-Each task uses an evaluator key and config rather than hardcoded datasets or model names. Evaluators implement:
+Each task explicitly selects a server-owned evaluator with `Task.evaluator_key`.
+The Worker calls `Evaluator.evaluate(EvaluationRequest) -> EvaluationResult` and
+then `cleanup(request)`. Internal requests contain validated artifact/manifest
+metadata, paths and context; results contain primary score/metric, secondary
+metrics and evaluator/dataset versions. Public schemas contain no internal paths.
 
-- `validate_submission()`
-- `prepare()`
-- `run_inference()`
-- `compute_metrics()`
-- `format_result()`
-- `cleanup()`
-
-`mock` now completes the queue/score/leaderboard flow using the server-computed artifact digest. Sentiment Analysis should be the first real evaluator, but only after the isolated execution backend in `docs/submission-security.md` is implemented.
+Only `mock_v1` runs today; historical `mock` is a compatibility alias. Its existing
+digest score and secondary metrics are unchanged. `lab02_sentiment_v1` defines a
+data-only manifest/config/three-file ZIP contract and remains unregistered and
+unavailable for execution. See `docs/evaluator-contract.md`. Real model inference,
+hidden datasets, GPUs and isolated evaluator containers remain deferred.
 
 ## Security Boundaries
 
