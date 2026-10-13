@@ -10,5 +10,42 @@ body {
   margin: 0;
   background: #f7f7f4;
   color: #1c1f23;
+  font-family: Arial, "Apple SD Gothic Neo", sans-serif;
+  letter-spacing: 0;
 }
 
+* {
+  box-sizing: border-box;
+}
+
+a, button, input, select, textarea {
+  letter-spacing: 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.875rem;
+}
+
+th {
+  white-space: nowrap;
+  background: #fafafa;
+  padding: 0.75rem 1rem;
+  color: #52525b;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+td {
+  padding: 0.875rem 1rem;
+  border-top: 1px solid #e4e4e7;
+  color: #27272a;
+  vertical-align: top;
+}
+
+:focus-visible {
+  outline: 2px solid #059669;
+  outline-offset: 2px;
+}

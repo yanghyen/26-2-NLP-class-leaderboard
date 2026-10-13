@@ -18,6 +18,7 @@ class EvaluationContext:
 
 class Evaluator(ABC):
     key: str
+    version = "unversioned"
 
     @abstractmethod
     def validate_submission(self, context: EvaluationContext) -> None:

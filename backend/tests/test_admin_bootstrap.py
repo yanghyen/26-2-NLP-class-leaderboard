@@ -41,9 +41,8 @@ def test_admin_bootstrap_is_idempotent_and_does_not_reset_password(db_session):
 
 
 def test_admin_bootstrap_rejects_existing_student_nickname(client, db_session):
-    from tests.conftest import register_student
-
-    register_student(client, nickname="NLPHero")
+    db_session.add(User(nickname="NLPHero", avatar_id="brain", password_hash="!disabled", role=UserRole.STUDENT, is_active=False))
+    db_session.commit()
     with pytest.raises(AdminBootstrapError, match="일반 계정"):
         create_or_get_admin(
             db_session,

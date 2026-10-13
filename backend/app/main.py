@@ -39,3 +39,16 @@ app.include_router(admin.router)
 app.include_router(tasks.router)
 app.include_router(submissions.router)
 
+
+
+from fastapi import Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.responses import JSONResponse
+
+
+@app.exception_handler(RequestValidationError)
+async def safe_request_validation(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith("/submissions"):
+        return JSONResponse(status_code=422, content={"detail": "제출 입력 형식을 확인하세요."})
+    return await request_validation_exception_handler(request, exc)

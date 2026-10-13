@@ -6,6 +6,7 @@ from app.evaluators.base import EvaluationContext, Evaluator
 
 class MockEvaluator(Evaluator):
     key = "mock"
+    version = "mock-v1"
 
     def validate_submission(self, context: EvaluationContext) -> None:
         return None

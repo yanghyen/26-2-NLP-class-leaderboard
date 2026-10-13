@@ -12,6 +12,7 @@ from app.evaluators.base import EvaluationContext, Evaluator
 from app.evaluators.registry import get_evaluator
 from app.models import EvaluationJob, Score
 from app.queue import JobQueue, QueueUnavailableError, RedisJobQueue
+from app.services.artifact_cleanup import cleanup_successful_artifacts, cleanup_successful_submission
 from app.services.state import transition_job, transition_submission
 from app.storage import LocalArtifactStorage
 from app.storage.base import ArtifactStorage
@@ -93,9 +94,24 @@ def process_job(
             transition_job(job, SubmissionStatus.COMPLETED)
             transition_submission(submission, SubmissionStatus.COMPLETED)
             submission.completed_at = datetime.now(UTC)
+            submission.evaluator_version = evaluator.version
+            dataset_version = context.dataset_config.get(
+                "dataset_version", context.dataset_config.get("version")
+            )
+            submission.dataset_version = str(dataset_version) if dataset_version is not None else None
+            submission.artifact_cleanup_status = "pending"
             job.error_kind = None
             job.safe_error_message = None
+            from app.services.results import pin_baseline
+            pin_baseline(db, submission)
             db.commit()
+            # Separate transaction; cleanup errors must never enter evaluation retry handling.
+            try:
+                cleanup_successful_submission(
+                    submission.id, db_factory=db_factory, storage=storage
+                )
+            except Exception:
+                logger.exception("Post-commit artifact cleanup failed: submission_id=%s", submission.id)
         finally:
             try:
                 evaluator.cleanup(context)
@@ -130,8 +146,12 @@ def run_worker_forever() -> None:
     storage = LocalArtifactStorage()
     worker_id = socket.gethostname()
     logger.info("Evaluation worker started with concurrency=1 worker_id=%s", worker_id)
+    next_cleanup = 0.0
     while True:
         try:
+            if time.monotonic() >= next_cleanup:
+                cleanup_successful_artifacts(storage=storage)
+                next_cleanup = time.monotonic() + 30
             job_id = queue.dequeue(timeout=5)
             if job_id:
                 process_job(job_id, queue=queue, storage=storage, worker_id=worker_id)

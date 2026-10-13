@@ -24,7 +24,6 @@ from app.models import Avatar, Base, CourseRoster, User
 from app.queue import InMemoryJobQueue, get_job_queue
 from app.security.malware import DisabledDevelopmentScanner, get_malware_scanner
 from app.services.avatars import ensure_default_avatars
-from app.services.registration import create_join_code
 from app.storage import get_artifact_storage
 from app.storage.local import LocalArtifactStorage
 
@@ -41,7 +40,6 @@ def db_session() -> Generator[Session, None, None]:
     db = TestingSessionLocal()
     try:
         ensure_default_avatars(db)
-        create_join_code(db, label="Fall 2026", code="JOIN-2026", deactivate_existing=True)
         db.add(CourseRoster(student_number="20260001", real_name="Kim NLP", section="A"))
         admin = User(
             nickname="RootTA",
@@ -85,25 +83,11 @@ def client(
     app.dependency_overrides.clear()
 
 
-def register_student(
-    client: TestClient,
-    nickname: str = "NLPHero",
-    student_number: str = "20260001",
-    real_name: str = "Kim NLP",
-) -> dict[str, str]:
-    response = client.post(
-        "/auth/register",
-        json={
-            "student_number": student_number,
-            "real_name": real_name,
-            "nickname": nickname,
-            "avatar_id": "brain",
-            "password": "student-password",
-            "join_code": "JOIN-2026",
-        },
-    )
-    assert response.status_code == 201, response.text
-    return response.json()
+def prepare_participant(client: TestClient, nickname="NLPHero", student_number="20260001", real_name="Kim NLP"):
+    from app.services.participants import get_participant
+    db = next(app.dependency_overrides[get_db]())
+    participant = get_participant(db, student_number, nickname, "🧠")
+    return {"id": participant.id, "nickname": participant.nickname}
 
 
 def login(client: TestClient, login_id: str, password: str) -> str:
@@ -191,16 +175,20 @@ def create_public_task(client: TestClient, admin_token: str, max_submissions: in
 
 def upload_submission(
     client: TestClient,
-    token: str,
+    student_number: str,
     kind: str = "EVALUATION",
     notebook_content: bytes | None = None,
     model_content: bytes | None = None,
+    nickname: str = "NLPHero",
+    emoji: str = "🧠",
 ):
     return client.post(
         "/submissions/sentiment",
-        headers=auth_header(token),
         data={
-            "kind": kind,
+            "student_number": student_number,
+            "nickname": nickname,
+            "emoji": emoji,
+            "submission_type": kind,
             "model_name": "tiny-sentiment",
             "base_model": "course/bert-base",
             "seed": "42",
@@ -212,7 +200,7 @@ def upload_submission(
                 notebook_content if notebook_content is not None else notebook_bytes(),
                 "application/json",
             ),
-            "model_zip": (
+            "artifact": (
                 "model.zip",
                 model_content if model_content is not None else model_zip_bytes(),
                 "application/zip",

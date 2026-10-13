@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.enums import EvaluationSplit, SubmissionKind, SubmissionStatus, TaskStage, UserRole
 
@@ -12,15 +12,6 @@ class AvatarOut(BaseModel):
     label: str
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class RegisterIn(BaseModel):
-    student_number: str = Field(min_length=1, max_length=64)
-    real_name: str = Field(min_length=1, max_length=120)
-    nickname: str = Field(min_length=2, max_length=16)
-    avatar_id: str
-    password: str = Field(min_length=8, max_length=128)
-    join_code: str = Field(min_length=1, max_length=120)
 
 
 class LoginIn(BaseModel):
@@ -37,12 +28,6 @@ class ErrorResponse(BaseModel):
     detail: str
 
 
-class PublicProfile(BaseModel):
-    nickname: str
-    avatar_id: str
-    avatar_emoji: str
-
-
 class UserOut(BaseModel):
     id: str
     nickname: str
@@ -54,38 +39,53 @@ class UserOut(BaseModel):
     password_reset_required: bool
 
 
-class JoinCodeIn(BaseModel):
-    label: str = Field(min_length=1, max_length=120)
-    code: str = Field(min_length=6, max_length=120)
-    deactivate_existing: bool = True
-
-
-class JoinCodeOut(BaseModel):
-    id: str
-    label: str
-    is_active: bool
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
 class RosterRowOut(BaseModel):
     student_number: str
     real_name: str
     section: str | None
-    registered_user_id: str | None
+    participant_id: str | None = None
     nickname: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
+class ArtifactPolicyIn(BaseModel):
+    allowed_paths: list[str] | None = Field(default=None, min_length=1, max_length=256)
+    allowed_architectures: list[str] = Field(min_length=1, max_length=64)
+    allowed_dtypes: list[str] | None = Field(default=None, min_length=1, max_length=32)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("allowed_paths", "allowed_architectures", "allowed_dtypes")
+    @classmethod
+    def validate_unique_values(cls, values: list[str] | None) -> list[str] | None:
+        if values is None:
+            return None
+        normalized = [value.strip() for value in values]
+        if any(not value for value in normalized):
+            raise ValueError("정책 목록에는 빈 값을 사용할 수 없습니다.")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("정책 목록에는 중복 값을 사용할 수 없습니다.")
+        return normalized
+
+
 class TaskConfigIn(BaseModel):
     dataset_config: dict[str, Any] = Field(default_factory=dict)
-    allowed_models: list[str] = Field(default_factory=list)
-    artifact_policy: dict[str, Any] = Field(default_factory=dict)
+    allowed_models: list[str] = Field(min_length=1, max_length=64)
+    artifact_policy: ArtifactPolicyIn
     metric_config: dict[str, Any] = Field(default_factory=dict)
     split_config: dict[str, Any] = Field(default_factory=dict)
     scoring_strategy: str = "task_primary_score"
+
+    @field_validator("allowed_models")
+    @classmethod
+    def validate_allowed_models(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip() for value in values]
+        if any(not value for value in normalized):
+            raise ValueError("허용 base model에는 빈 값을 사용할 수 없습니다.")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("허용 base model에는 중복 값을 사용할 수 없습니다.")
+        return normalized
 
 
 class TaskCreateIn(BaseModel):
@@ -98,7 +98,49 @@ class TaskCreateIn(BaseModel):
     max_zip_bytes: int = Field(default=500_000_000, ge=1_000_000)
     timeout_seconds: int = Field(default=900, ge=30)
     evaluator_key: str = "mock"
-    config: TaskConfigIn = Field(default_factory=TaskConfigIn)
+    opens_at: datetime | None = None
+    dev_deadline: datetime | None = None
+    final_deadline: datetime | None = None
+    config: TaskConfigIn
+
+
+class TaskConfigUpdateIn(BaseModel):
+    dataset_config: dict[str, Any] | None = None
+    allowed_models: list[str] | None = Field(default=None, min_length=1, max_length=64)
+    artifact_policy: ArtifactPolicyIn | None = None
+    metric_config: dict[str, Any] | None = None
+    split_config: dict[str, Any] | None = None
+    scoring_strategy: str | None = Field(default=None, min_length=1, max_length=80)
+
+    @field_validator("allowed_models")
+    @classmethod
+    def validate_allowed_models(cls, values: list[str] | None) -> list[str] | None:
+        if values is None:
+            return None
+        return TaskConfigIn.validate_allowed_models(values)
+
+
+class TaskUpdateIn(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    description: str | None = None
+    stage: TaskStage | None = None
+    is_public: bool | None = None
+    max_official_submissions: int | None = Field(default=None, ge=0, le=100)
+    max_zip_bytes: int | None = Field(default=None, ge=1_000_000)
+    timeout_seconds: int | None = Field(default=None, ge=30)
+    evaluator_key: str | None = Field(default=None, min_length=1, max_length=80)
+    opens_at: datetime | None = None
+    dev_deadline: datetime | None = None
+    final_deadline: datetime | None = None
+    config: TaskConfigUpdateIn | None = None
+
+    @model_validator(mode="after")
+    def reject_empty_update(self) -> "TaskUpdateIn":
+        if not self.model_fields_set:
+            raise ValueError("수정할 필드를 하나 이상 전달해야 합니다.")
+        if self.config is not None and not self.config.model_fields_set:
+            raise ValueError("빈 config로 정책을 덮어쓸 수 없습니다.")
+        return self
 
 
 class TaskOut(BaseModel):
@@ -153,11 +195,7 @@ class SubmissionOut(BaseModel):
     task_id: str
     kind: SubmissionKind
     status: SubmissionStatus
-    submission_number: int
     model_name: str | None
-    base_model: str | None
-    seed: int | None
-    official_attempt_consumed: bool
     safe_error_message: str | None
     created_at: datetime
 
@@ -183,11 +221,20 @@ class SubmissionFileOut(BaseModel):
 class SubmissionDetailOut(SubmissionOut):
     scores: list[ScoreOut] = Field(default_factory=list)
     files: list[SubmissionFileOut] = Field(default_factory=list)
-    is_final_selection: bool = False
 
 
 class SubmissionAdminOut(SubmissionOut):
-    user_id: str
+    artifact_cleanup_status: str
+    artifact_deleted_at: datetime | None
+    evaluator_version: str | None
+    dataset_version: str | None
+    submission_number: int
+    base_model: str | None
+    seed: int | None
+    official_attempt_consumed: bool
+    user_id: str | None = None
+    participant_id: str | None = None
+    student_number: str | None = None
     nickname: str = ""
     task_slug: str = ""
     task_title: str = ""
@@ -220,13 +267,15 @@ class SubmissionCreateOut(BaseModel):
 
 
 class LeaderboardRowOut(BaseModel):
+    baseline_score: float | None = None
+    best_development_score: float | None = None
+    improvement: float | None = None
     model_config = ConfigDict(protected_namespaces=())
 
     rank: int
     nickname: str
     avatar_id: str
     avatar_emoji: str
-    submission_id: str
     primary_metric: str
     primary_score: float
     metrics: dict[str, Any]
@@ -234,9 +283,15 @@ class LeaderboardRowOut(BaseModel):
     submitted_at: datetime
 
 
-class FinalSelectionOut(BaseModel):
-    task_id: str
-    submission_id: str
-    created_at: datetime
-
+class PublicTaskConfigOut(BaseModel):
+    allowed_models: list[str]
+    artifact_policy: dict[str, Any]
     model_config = ConfigDict(from_attributes=True)
+
+
+class PublicTaskOut(TaskOut):
+    max_official_submissions: int = Field(exclude=True)
+
+
+class PublicTaskDetailOut(PublicTaskOut):
+    config: PublicTaskConfigOut
