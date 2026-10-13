@@ -58,7 +58,7 @@ def process_job(
         db.commit()
 
         started = time.monotonic()
-        storage.create_work_dir(job.id)
+        work_path = storage.create_work_dir(job.id)
         work_created = True
         artifact_path = storage.artifact_path(submission.id)
         if not artifact_path.is_dir():
@@ -79,6 +79,8 @@ def process_job(
             artifact_digest=submission.artifact_digest,
             check_timeout=lambda: _check_timeout(started, task.timeout_seconds),
             on_scoring=enter_scoring,
+            work_dir=work_path,
+            deadline_monotonic=started + task.timeout_seconds,
         )
         metadata = deepcopy(submission.validation_report)
         model_metadata = metadata.get("model", {})
@@ -116,9 +118,12 @@ def process_job(
             submission.completed_at = datetime.now(UTC)
             submission.evaluator_version = result.evaluator_version
             submission.dataset_version = result.dataset_version
+            if result.evaluation_metadata:
+                submission.validation_report = {**submission.validation_report, "evaluation": result.evaluation_metadata}
             submission.artifact_cleanup_status = "pending"
             job.error_kind = None
             job.safe_error_message = None
+            submission.safe_error_message = None
             from app.services.results import pin_baseline
             pin_baseline(db, submission)
             db.commit()
@@ -210,6 +215,8 @@ def _retry_or_fail_server_error(
     db: Session, job: EvaluationJob, queue: JobQueue, internal_error: str
 ) -> None:
     submission = job.submission
+    if job.status == SubmissionStatus.COMPLETED:
+        return
     if job.attempts < job.max_attempts and job.status in {
         SubmissionStatus.RUNNING,
         SubmissionStatus.SCORING,

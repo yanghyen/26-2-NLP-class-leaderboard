@@ -3,10 +3,22 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.models import Participant, Submission, Score, BaselineReference, Task
 from app.core.enums import SubmissionStatus, SubmissionKind, EvaluationSplit
+from app.evaluators.lab02_policy import evaluation_identity, validate_dataset_config
+from app.evaluators.errors import EvaluatorError
 
 
 def utc_time(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def score_is_current(task: Task, submission: Submission) -> bool:
+    if task.evaluator_key == "lab02_sentiment_v1":
+        try:
+            validate_dataset_config(task.config.dataset_config)
+            return (submission.evaluator_version, submission.dataset_version) == evaluation_identity(task.config.dataset_config)
+        except EvaluatorError:
+            return False
+    return task.evaluator_key in {"mock", "mock_v1"} and submission.evaluator_version in {None, "mock-v1"}
 
 
 def task_results(db: Session, task_id: str) -> list[dict]:
@@ -22,6 +34,7 @@ def task_results(db: Session, task_id: str) -> list[dict]:
             Submission.status == SubmissionStatus.COMPLETED, Score.visible_to_student.is_(True),
             Score.split.in_([EvaluationSplit.SMOKE, EvaluationSplit.PUBLIC]),
         ).order_by(Submission.completed_at, Submission.created_at, Submission.id)).all()
+        pairs = [pair for pair in pairs if score_is_current(task, pair[0])]
         if deadline:
             pairs = [pair for pair in pairs if utc_time(pair[0].completed_at or pair[0].created_at) <= utc_time(deadline)]
         reference = db.scalar(select(BaselineReference).where(BaselineReference.participant_id == participant.id, BaselineReference.task_id == task_id))

@@ -21,6 +21,8 @@ class EvaluationContext:
     trust_remote_code: bool = field(default=False, init=False)
     check_timeout: Callable[[], None] = field(default=_noop, repr=False, compare=False)
     on_scoring: Callable[[], None] = field(default=_noop, repr=False, compare=False)
+    deadline_monotonic: float | None = None
+    work_dir: Path | None = None
 
     def begin_scoring(self) -> None:
         """Worker-owned timeout checkpoint and RUNNING -> SCORING transition."""
@@ -47,6 +49,7 @@ class EvaluationResult:
     secondary_metrics: dict[str, Any]
     evaluator_version: str
     dataset_version: str
+    evaluation_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class Evaluator(ABC):

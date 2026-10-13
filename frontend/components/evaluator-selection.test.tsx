@@ -24,13 +24,13 @@ describe("admin evaluator selection", () => {
     mocks.update.mockResolvedValue(undefined);
   });
 
-  it("creates a task with an explicit mock_v1 selection and disables Lab02", async () => {
+  it("creates a task with an explicit mock_v1 selection and offers Lab02 with required local data preparation", async () => {
     render(<AdminTasksPage />);
     await screen.findByText("Existing task");
     fireEvent.click(screen.getByRole("button", { name: "태스크 생성" }));
     const select = screen.getByLabelText("Evaluator") as HTMLSelectElement;
     expect(select.value).toBe("mock_v1");
-    expect((screen.getByRole("option", { name: /lab02_sentiment_v1/ }) as HTMLOptionElement).disabled).toBe(true);
+    expect((screen.getByRole("option", { name: /lab02_sentiment_v1/ }) as HTMLOptionElement).disabled).toBe(false);
     fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "lab02-name" } });
     fireEvent.change(screen.getByLabelText("제목"), { target: { value: "Lab02 Sentiment" } });
     fireEvent.click(screen.getByRole("button", { name: "생성" }));

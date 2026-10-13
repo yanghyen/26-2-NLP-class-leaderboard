@@ -78,9 +78,19 @@ describe("task policy editor", () => {
     }))).toBe(false);
   });
 
-  it("rejects unavailable and unknown evaluator selections before saving", () => {
+  it("requires prepared local dataset configuration for Lab02 and rejects unknown keys", () => {
     const form = taskPolicyForm(task({ allowed_architectures: ["BertForSequenceClassification"] }));
-    expect(validateTaskPolicyForm({ ...form, evaluatorKey: "lab02_sentiment_v1" })).toContain("mock_v1뿐");
-    expect(validateTaskPolicyForm({ ...form, evaluatorKey: "unknown" })).toContain("mock_v1뿐");
+    expect(validateTaskPolicyForm({ ...form, evaluatorKey: "lab02_sentiment_v1" })).toContain("준비 명령");
+    expect(validateTaskPolicyForm({ ...form, evaluatorKey: "unknown" })).toContain("지원하지 않는");
+  });
+
+  it("serializes prepared Lab02 data and the 0–1 macro F1 metric without changing Mock", () => {
+    const form = taskPolicyForm(task({ allowed_architectures: ["BertForSequenceClassification"] }));
+    const data = { path: "/srv/data/reviews.jsonl", metadata_path: "/srv/data/metadata.json", version: "local-v1", sha256: "a".repeat(64), sample_count: 2 };
+    const lab = { ...form, evaluatorKey: "lab02_sentiment_v1", models: "google-bert/bert-base-uncased", datasetConfig: JSON.stringify(data) };
+    expect(validateTaskPolicyForm(lab)).toBeNull();
+    expect(taskUpdatePayload(lab).config?.dataset_config).toEqual(data);
+    expect(taskUpdatePayload(lab).config?.metric_config).toEqual({ primary: "macro_f1", scale: "0_1" });
+    expect(taskUpdatePayload(form).config?.dataset_config).toBeUndefined();
   });
 });

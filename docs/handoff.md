@@ -50,3 +50,27 @@ Deferred: real GPU evaluator, real hidden-test evaluation, real ClamAV integrati
 The workspace already had many modified/untracked backend/frontend/docs files before this task, including migration 0003 and the student/admin UI. The initial tracked diff was preserved in `/tmp/leaderboard-before.patch`. Related edits reuse that existing work; unrelated changes, `test.csv`, `test.csv.zip`, original DBs, secrets and uploaded artifacts were not changed or staged. A standalone commit would require including pre-existing UI/migration prerequisites or leave the tree unable to run; therefore no partial/incomplete commit is made. The working tree remains reviewable and no user changes are committed.
 
 Final automated results: Backend **67 passed** (one upstream Starlette deprecation warning), Frontend **26 passed** across 8 files. TypeScript, ESLint, Next production build, Python compile, all described Alembic checks and whitespace checks passed. No security tests were removed. Manual browser checks and real Redis/Docker remain unverified as described above.
+
+
+## Current Lab02 runtime update
+
+The real `lab02_sentiment_v1` evaluator is now registered separately from unchanged
+Mock. It uses the existing interface/Worker and data-only Lab02 ZIP contract,
+pinned server config/tokenizer, strict safetensors loading, local JSONL, whole-set
+Macro F1/Accuracy and a hard-deadline per-Job process. IMDb public test is temporary
+public evaluation data. Model/data preparation is administrator-only; Jobs are
+offline. Current-identity aggregation prevents mixing Mock, old data or different
+runtime policies; historical records and the fixed Baseline reference remain.
+A scoring-transaction failure can now follow the already-intended SCORING -> QUEUED
+infrastructure retry; failed commits retain files and no duplicate scores are saved.
+No new DB migration was needed. Existing user changes were preserved.
+
+The full supplied Lab2 ZIP was verified through production loading/CPU inference
+on four separate public IMDb smoke reviews, Worker/SQLite persistence, aggregation
+and successful artifact-copy deletion. Macro F1 0.7333333333333334, Accuracy 0.75;
+this is not a full-test-set result. The pinned 25,000-row JSONL preparation was
+verified, but full IMDb inference, GPU, real Redis/PostgreSQL and Docker integration
+were not executed. A PostgreSQL client alone does not establish an available test
+server. Stronger production container/network/filesystem isolation is still required;
+existing security settings were not relaxed. See `lab02-evaluator.md` for current
+commands, configuration, version/retention limits and verification details.

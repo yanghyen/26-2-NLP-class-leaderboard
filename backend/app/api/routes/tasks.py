@@ -10,6 +10,7 @@ from app.services.audit import write_audit
 from app.services.results import task_results
 from app.evaluators.errors import EvaluatorError
 from app.evaluators.registry import get_evaluator
+from app.evaluators.lab02_policy import validate_task_config
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -19,6 +20,15 @@ def validate_evaluator_selection(key: object) -> str:
         return get_evaluator(key).key
     except EvaluatorError as exc:
         raise HTTPException(status_code=400, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
+def validate_lab02_selection(key: str, config: dict) -> None:
+    if key == "lab02_sentiment_v1":
+        try:
+            validate_task_config(config["dataset_config"], config["metric_config"],
+                                 config["allowed_models"], config["artifact_policy"])
+        except EvaluatorError as exc:
+            raise HTTPException(400, detail={"code": exc.code, "message": str(exc)}) from exc
 
 
 @router.get("", response_model=list[PublicTaskOut])
@@ -53,6 +63,7 @@ def create_task(
     actor: User = Depends(require_admin),
 ) -> Task:
     evaluator_key = validate_evaluator_selection(payload.evaluator_key)
+    validate_lab02_selection(evaluator_key, payload.config.model_dump())
     if db.scalar(select(Task).where(Task.slug == payload.slug)):
         raise HTTPException(status_code=400, detail="이미 존재하는 태스크 slug입니다.")
     task = Task(
@@ -104,6 +115,11 @@ def update_task(
     evaluator_key = validate_evaluator_selection(
         payload.evaluator_key if "evaluator_key" in payload.model_fields_set else task.evaluator_key
     )
+    prospective = {k: getattr(task.config, k) for k in
+                   ("dataset_config", "metric_config", "allowed_models", "artifact_policy")}
+    if payload.config is not None:
+        prospective.update(payload.config.model_dump(exclude_unset=True))
+    validate_lab02_selection(evaluator_key, prospective)
     before = {
         "evaluator_key": task.evaluator_key,
         "title": task.title,

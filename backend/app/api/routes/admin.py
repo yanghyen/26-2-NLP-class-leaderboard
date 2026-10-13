@@ -332,6 +332,9 @@ def reset_baseline(participant_id: str, task_slug: str, payload: BaselineUpdate,
     submission = db.get(Submission, payload.submission_id)
     if not task or not submission or submission.participant_id != participant_id or submission.task_id != task.id or submission.kind != SubmissionKind.BASELINE_PRACTICE or submission.status != SubmissionStatus.COMPLETED:
         raise HTTPException(400, "성공한 동일 참가자·태스크의 Baseline만 지정할 수 있습니다.")
+    from app.services.results import score_is_current
+    if not score_is_current(task, submission):
+        raise HTTPException(400, "현재 평가 버전의 Baseline만 지정할 수 있습니다.")
     if not db.scalar(select(Score).where(Score.submission_id == submission.id, Score.visible_to_student.is_(True), Score.split == EvaluationSplit.SMOKE)):
         raise HTTPException(400, "Baseline 평가 결과가 없습니다.")
     reference = db.scalar(select(BaselineReference).where(BaselineReference.participant_id == participant_id, BaselineReference.task_id == task.id))

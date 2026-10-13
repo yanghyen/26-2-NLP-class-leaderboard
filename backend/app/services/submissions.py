@@ -26,6 +26,7 @@ from app.storage.base import ArtifactStorage, UploadTooLargeError
 from app.task_policy import is_submission_policy_configured
 from app.evaluators.errors import EvaluatorError
 from app.evaluators.registry import get_evaluator
+from app.evaluators.lab02_policy import validate_task_config
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,9 @@ async def create_submission_from_upload(
     if payload.kind != SubmissionKind.DRAFT:
         try:
             get_evaluator(task.evaluator_key)
+            if task.evaluator_key == "lab02_sentiment_v1":
+                validate_task_config(task.config.dataset_config, task.config.metric_config,
+                                     task.config.allowed_models, task.config.artifact_policy)
         except EvaluatorError as exc:
             raise SubmissionUploadError(exc.code, str(exc)) from exc
     db.scalar(select(Participant).where(Participant.id == participant.id).with_for_update())
@@ -119,6 +123,7 @@ async def create_submission_from_upload(
             max_uncompressed_bytes=task.max_zip_bytes,
             allowed_models=task.config.allowed_models,
             artifact_policy=task.config.artifact_policy,
+            contract_key=task.evaluator_key if task.evaluator_key == "lab02_sentiment_v1" else None,
         )
         scan_result = scanner.scan([notebook_path, archive_path])
         submission.malware_scan_status = scan_result.status.value

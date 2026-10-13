@@ -16,5 +16,5 @@ export default function SubmissionDetailPage() {
   if (loading && !data) return <LoadingState />;
   if (error && !data) return <ErrorState message={error} retry={refresh} />;
   if (!data) return null;
-  return <div className="space-y-6"><PageHeader title={data.model_name || "제출 결과"} description={`제출 시각 ${formatDate(data.created_at)}`} /><p>제출 유형: {data.kind}</p>{data.kind !== "DRAFT" && <SubmissionRetentionNotice />}<StatusBadge status={data.status} kind={data.kind} /><p>평가 상태: {data.kind === "DRAFT" ? "평가 대상 아님" : data.status}</p><p>공개 점수: {formatScore(data.scores[0]?.primary_score)}</p>{data.safe_error_message && <p role="alert">{data.safe_error_message}</p>}<Button onClick={() => void refresh()}>새로고침</Button></div>;
+  return <div className="space-y-6"><PageHeader title={data.model_name || "제출 결과"} description={`제출 시각 ${formatDate(data.created_at)}`} /><p>제출 유형: {data.kind}</p>{data.kind !== "DRAFT" && <SubmissionRetentionNotice />}<StatusBadge status={data.status} kind={data.kind} /><p>평가 상태: {data.kind === "DRAFT" ? "평가 대상 아님" : data.status}</p><p>공개 점수: {formatScore(data.scores[0]?.primary_score)}{data.scores[0] && ` (${data.scores[0].primary_metric})`}</p>{data.safe_error_message && <p role="alert">{data.safe_error_message}</p>}<Button onClick={() => void refresh()}>새로고침</Button></div>;
 }

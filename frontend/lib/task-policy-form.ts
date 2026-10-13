@@ -6,6 +6,7 @@ export interface TaskPolicyForm {
   stage: TaskStage;
   isPublic: boolean;
   evaluatorKey: string;
+  datasetConfig: string;
   models: string;
   architectures: string;
   paths: string;
@@ -23,6 +24,7 @@ export function taskPolicyForm(task: TaskDetail): TaskPolicyForm {
     stage: task.stage,
     isPublic: task.is_public,
     evaluatorKey: task.evaluator_key === "mock" ? "mock_v1" : task.evaluator_key,
+    datasetConfig: JSON.stringify(task.config.dataset_config ?? {}, null, 2),
     models: task.config.allowed_models.join(", "),
     architectures: (task.config.artifact_policy.allowed_architectures ?? []).join(", "),
     paths: (task.config.artifact_policy.allowed_paths ?? []).join(", "),
@@ -38,7 +40,15 @@ export function validateTaskPolicyForm(form: TaskPolicyForm): string | null {
   const models = csvValues(form.models);
   const architectures = csvValues(form.architectures);
   if (!form.title.trim()) return "태스크 제목을 입력하세요.";
-  if (form.evaluatorKey !== "mock_v1") return "현재 사용할 수 있는 evaluator는 mock_v1뿐입니다.";
+  if (!["mock_v1", "lab02_sentiment_v1"].includes(form.evaluatorKey)) return "지원하지 않는 evaluator입니다.";
+  if (form.evaluatorKey === "lab02_sentiment_v1") {
+    try {
+      const data = JSON.parse(form.datasetConfig);
+      if (!data || typeof data !== "object" || Array.isArray(data) || !data.path || !data.metadata_path || !data.version || !data.sha256 || !data.sample_count) {
+        return "준비 명령이 반환한 Lab02 dataset 설정을 입력하세요.";
+      }
+    } catch { return "Lab02 dataset 설정은 JSON object여야 합니다."; }
+  }
   if (!models.length) return "허용 base model을 하나 이상 입력하세요.";
   if (!architectures.length) return "허용 architecture를 하나 이상 입력하세요.";
   if ([models, architectures, csvValues(form.paths), csvValues(form.dtypes)].some(hasDuplicates)) {
@@ -57,6 +67,9 @@ export function taskUpdatePayload(form: TaskPolicyForm): TaskUpdatePayload {
     is_public: form.isPublic,
     evaluator_key: form.evaluatorKey,
     config: {
+      ...(form.evaluatorKey === "lab02_sentiment_v1" ? {
+        dataset_config: JSON.parse(form.datasetConfig), metric_config: { primary: "macro_f1", scale: "0_1" }
+      } : {}),
       allowed_models: csvValues(form.models),
       artifact_policy: {
         allowed_architectures: csvValues(form.architectures),

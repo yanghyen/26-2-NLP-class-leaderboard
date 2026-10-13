@@ -57,11 +57,11 @@ def test_configured_dataset_version_remains_compatible(config):
 @pytest.mark.parametrize("key,code", [
     ("/private/server/eval.py", "UNKNOWN_EVALUATOR"),
     ("__import__('os')", "UNKNOWN_EVALUATOR"),
-    ("lab02_sentiment_v1", "EVALUATOR_NOT_AVAILABLE"),
+    ("disabled_evaluator_v1", "UNKNOWN_EVALUATOR"),
     (None, "EVALUATOR_CONFIG_INVALID"), ("", "EVALUATOR_CONFIG_INVALID"),
 ])
 def test_registry_is_explicit_and_returns_safe_errors(key, code):
-    assert set(EVALUATORS) == {"mock_v1"}
+    assert set(EVALUATORS) == {"mock_v1", "lab02_sentiment_v1"}
     with pytest.raises(EvaluatorError) as caught:
         get_evaluator(key)
     assert caught.value.code == code
@@ -116,7 +116,7 @@ def test_worker_calls_only_common_evaluate_interface_and_persists_result(
 
 @pytest.mark.parametrize("key,code", [
     ("private.module.evaluator", "UNKNOWN_EVALUATOR"),
-    ("lab02_sentiment_v1", "EVALUATOR_NOT_AVAILABLE"),
+    ("lab02_sentiment_v1", "EVALUATOR_CONFIG_INVALID"),
 ])
 def test_legacy_bad_task_config_is_refused_at_upload_and_worker(
     client, db_session, job_queue, artifact_storage, key, code
@@ -157,7 +157,7 @@ def task_payload(key):
 
 @pytest.mark.parametrize("key,code", [
     ("/private/server/eval.py", "UNKNOWN_EVALUATOR"),
-    ("lab02_sentiment_v1", "EVALUATOR_NOT_AVAILABLE"),
+    ("lab02_sentiment_v1", "EVALUATOR_CONFIG_INVALID"),
     (None, "EVALUATOR_CONFIG_INVALID"), ("", "EVALUATOR_CONFIG_INVALID"),
     ({"module": "/private/unsafe.py"}, "EVALUATOR_CONFIG_INVALID"),
 ])

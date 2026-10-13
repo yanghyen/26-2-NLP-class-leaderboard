@@ -2,19 +2,19 @@
 
 ## Current executable boundary
 
-Only `mock_v1` is registered in `app/evaluators/registry.py`. Historical DB/API
+`mock_v1` and `lab02_sentiment_v1` are registered in `app/evaluators/registry.py`. Historical DB/API
 `mock` keys are an explicit compatibility alias; newly created/edited Tasks store
 `mock_v1`. `Task.evaluator_key` already exists, so no DB migration is required.
 Task title, slug, submitted filenames and student metadata never select code.
 The registry is a fixed mapping of server-owned evaluators: no dynamic imports,
 module paths, commands or student code are evaluated.
 
-`lab02_sentiment_v1` is reserved and has a data-only contract. It is not registered
-or executable. Selecting it returns safe `EVALUATOR_NOT_AVAILABLE`; unknown keys
-return `UNKNOWN_EVALUATOR`, malformed selections `EVALUATOR_CONFIG_INVALID`.
-Task POST/PATCH rejects these before changing the DB. Legacy misconfigured Tasks
-are also refused before upload storage/queueing, and guarded again by the Worker.
-Admin task creation/edit forms explicitly select `mock_v1`; Lab02 is disabled.
+`lab02_sentiment_v1` now runs offline BERT sentiment inference in a Job subprocess.
+Its Task must have prepared local data metadata and the Lab02 model/metric policy;
+otherwise selection returns `EVALUATOR_CONFIG_INVALID`. Unknown keys still return
+`UNKNOWN_EVALUATOR`. Existing Tasks are not automatically switched. See
+`docs/lab02-evaluator.md` for preparation, resource settings, dataset replacement
+and the production isolation boundary.
 
 ## Common interface
 
@@ -75,8 +75,8 @@ is declared, it must match the server policy.
 
 Server policy is a fixed server-provided tokenizer, `max_length=128`, primary
 `macro_f1`, secondary `accuracy`. These are not required fields in the notebook
-manifest, and no student tokenizer/config can change them. Tokenizer provisioning
-and inference are not implemented in this step.
+manifest, and no student tokenizer/config can change them. Tokenizer provisioning is performed by the admin preparation command; Jobs use
+only the prepared local server tokenizer.
 
 The ZIP must contain exactly three top-level regular files, without extra
 directories, execution code, tokenizer files or nested model layouts:
@@ -107,8 +107,8 @@ existing ZIP envelope/path/link/bomb/allowlist checks, confined extraction,
 data-only JSON validation, executable detection and safetensors parsing before
 contract validation. Omitting `contract_key` retains the existing Mock upload
 layout (`submission.json`, `model/config.json`, `model/model.safetensors`). The
-reserved contract branch is available to trusted validation code and tests; no
-live Lab02 Task/evaluator is enabled by it.
+contract branch is selected explicitly for Lab02 Task uploads; Mock retains its
+original layout.
 
 Contract errors are `LAB02_MANIFEST_INVALID` or `LAB02_CONFIG_INVALID`. Shared
 ZIP/weight security violations retain existing security codes. Fixed public
@@ -116,17 +116,19 @@ messages do not echo submitted data, paths or traceback details.
 
 The two tiny JSON fixtures in `backend/tests/fixtures/lab02/` are the unchanged
 metadata read from the supplied submission ZIP. Its approximately 438 MB weights
-were not read/extracted during inspection. Tests use tiny synthetic safetensors
-to verify the shared security path; they do not certify that supplied weights
-match a real BERT model.
+were not read/extracted during that earlier contract inspection. Runtime loading
+and inference verification of the supplied weights is described below.
 
-## Next step and verification limits
+## Runtime and verification
 
-Implement the real Lab02 evaluator independently behind this interface in a later
-step. PyTorch/Transformers loading, BERT inference, GPU use, hidden datasets and
-Docker-isolated evaluation are unimplemented. Mock scores remain the live scores.
+The real Lab02 implementation uses this interface and contract. It creates a
+server-owned BertForSequenceClassification from the pinned server config, loads
+safetensors strictly, uses local JSONL data, and returns whole-dataset Macro F1 and
+Accuracy. Offline CPU tests use a real tiny BERT; full supplied Lab2 weights were
+also verified on a distinct four-review IMDb smoke dataset through Worker storage
+and artifact deletion. No full-test-set performance claim is made.
 
-Validation here uses unit/API/component tests, the existing in-memory queue and
-SQLite migration regression tests. Actual Redis/PostgreSQL/GPU container and
-Docker integration checks: **Docker environment unconfirmed; unverified**.
-No Docker installation/setup or security-boundary bypass is required or performed.
+The subprocess enforces lifecycle/timeout and prevents inference overlap. It is
+not a replacement for the stronger per-Job production container boundary in
+`submission-security.md`. Docker/real Redis/PostgreSQL/GPU integration remains
+unverified on the current Mac. See `lab02-evaluator.md` for details.

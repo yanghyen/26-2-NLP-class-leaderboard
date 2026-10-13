@@ -6,6 +6,10 @@ SAFE_EVALUATOR_MESSAGES = {
     "EVALUATOR_CONFIG_INVALID": "evaluator 설정이 올바르지 않습니다.",
     "LAB02_MANIFEST_INVALID": "Lab02 manifest 또는 파일 구성이 올바르지 않습니다.",
     "LAB02_CONFIG_INVALID": "Lab02 모델 config가 평가 규격과 일치하지 않습니다.",
+    "MODEL_WEIGHTS_INVALID": "모델 가중치가 서버 모델 구조와 일치하지 않거나 유효하지 않습니다.",
+    "EVALUATION_DATA_INVALID": "서버 평가 데이터 설정이 올바르지 않습니다.",
+    "EVALUATION_RESOURCE_LIMIT": "평가 자원 제한을 초과했습니다.",
+    "EVALUATION_TIMEOUT": "평가 시간 제한을 초과했습니다.",
 }
 
 

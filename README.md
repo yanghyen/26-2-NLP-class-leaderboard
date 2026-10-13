@@ -30,7 +30,8 @@ cd frontend && NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000 \
 
 The mock badge is controlled at frontend build time. Set
 `NEXT_PUBLIC_SHOW_MOCK_EVALUATION=false` for a production build. This does not
-enable a real evaluator; production GPU evaluation remains deferred.
+select an evaluator. Lab02 requires separate resource/data preparation;
+production GPU deployment remains unverified.
 
 ## Backend Development
 
@@ -38,7 +39,7 @@ enable a real evaluator; production GPU evaluation remains deferred.
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-lab02.txt
 pytest
 uvicorn app.main:app --reload
 ```
@@ -80,14 +81,15 @@ Admins create tasks through `POST /tasks` with a configurable evaluator key, dat
 Implement `Evaluator.evaluate(EvaluationRequest) -> EvaluationResult` in
 `backend/app/evaluators/base.py`. Requests are internal objects containing validated
 artifact metadata and paths; results contain score, secondary metrics and version
-snapshots. Only `mock_v1` is executable today; historical `mock` keys remain a
-compatibility alias. Task creation/update validates the explicit evaluator key.
+snapshots. `mock_v1` and prepared `lab02_sentiment_v1` are executable; historical `mock`
+keys remain a compatibility alias. Task creation/update validates the explicit evaluator key.
 
-`lab02_sentiment_v1` has a data-only contract and validator, but is not registered
-as an evaluator. Its selection returns `EVALUATOR_NOT_AVAILABLE`. Real BERT/model
-loading, GPU inference, hidden data and isolated evaluator containers remain
-unimplemented. See `docs/evaluator-contract.md` for the interface and Lab02 ZIP
-format. The next step is an independent Lab02 evaluator implementation.
+Lab02 now creates the fixed server BERT classifier, strictly loads safetensors,
+and runs offline local JSONL sentiment evaluation in a bounded Job subprocess.
+IMDb public test is the temporary evaluation data, not a hidden set. Existing
+Tasks and Mock scores are not automatically changed. See `docs/lab02-evaluator.md`
+for dependency installation, pinned resource/data preparation, CPU/CUDA settings,
+score identities and the stronger production container boundary still required.
 
 ## Hidden Tests
 

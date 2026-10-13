@@ -168,6 +168,8 @@ export interface TaskUpdatePayload {
   is_public?: boolean;
   max_official_submissions?: number;
   config?: {
+    dataset_config?: Record<string, unknown>;
+    metric_config?: Record<string, unknown>;
     allowed_models?: string[];
     artifact_policy?: {
       allowed_paths?: string[];

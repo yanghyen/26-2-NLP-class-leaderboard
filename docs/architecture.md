@@ -40,11 +40,14 @@ then `cleanup(request)`. Internal requests contain validated artifact/manifest
 metadata, paths and context; results contain primary score/metric, secondary
 metrics and evaluator/dataset versions. Public schemas contain no internal paths.
 
-Only `mock_v1` runs today; historical `mock` is a compatibility alias. Its existing
-digest score and secondary metrics are unchanged. `lab02_sentiment_v1` defines a
-data-only manifest/config/three-file ZIP contract and remains unregistered and
-unavailable for execution. See `docs/evaluator-contract.md`. Real model inference,
-hidden datasets, GPUs and isolated evaluator containers remain deferred.
+`mock_v1` retains its digest score and `mock` compatibility alias.
+`lab02_sentiment_v1` runs offline fixed BERT/safetensors inference on prepared local
+JSONL in a per-Job subprocess with a hard deadline. Task selection is explicit;
+existing Tasks are unchanged. Aggregate scores are filtered by the current
+evaluator/dataset identity. IMDb public test is temporary public evaluation data.
+See `docs/evaluator-contract.md` and `docs/lab02-evaluator.md`. Hidden datasets and
+stronger per-Job production containers remain deferred; CUDA support is implemented
+but GPU integration is unverified on this Mac.
 
 ## Security Boundaries
 

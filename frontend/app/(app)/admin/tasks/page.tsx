@@ -20,6 +20,7 @@ import type { TaskStage } from "../../../../lib/types";
 const initialCreate = {
   slug: "", title: "", description: "", stage: "DEVELOPMENT" as TaskStage,
   evaluatorKey: "mock_v1",
+  datasetConfig: "{}",
   models: "course/bert-base",
   architectures: "BertForSequenceClassification", public: true
 };
@@ -56,7 +57,8 @@ export default function AdminTasksPage() {
         config: {
           allowed_models: models,
           artifact_policy: { allowed_architectures: architectures },
-          metric_config: { primary: "mock_score" }
+          metric_config: createForm.evaluatorKey === "lab02_sentiment_v1" ? { primary: "macro_f1", scale: "0_1" } : { primary: "mock_score" },
+          ...(createForm.evaluatorKey === "lab02_sentiment_v1" ? { dataset_config: JSON.parse(createForm.datasetConfig) } : {})
         }
       });
       setCreateForm(initialCreate);
@@ -109,7 +111,8 @@ export default function AdminTasksPage() {
       <Field label="Slug"><input required pattern="[a-z0-9][a-z0-9-]{1,78}[a-z0-9]" className={inputClass} value={createForm.slug} onChange={(event) => setCreateForm({ ...createForm, slug: event.target.value })} /></Field>
       <Field label="제목"><input required className={inputClass} value={createForm.title} onChange={(event) => setCreateForm({ ...createForm, title: event.target.value })} /></Field>
       <Field label="Stage"><select className={inputClass} value={createForm.stage} onChange={(event) => setCreateForm({ ...createForm, stage: event.target.value as TaskStage })}>{Object.entries(STAGE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
-      <EvaluatorSelect value={createForm.evaluatorKey} onChange={(value) => setCreateForm({ ...createForm, evaluatorKey: value })} />
+      <EvaluatorSelect value={createForm.evaluatorKey} onChange={(value) => setCreateForm({ ...createForm, evaluatorKey: value, models: value === "lab02_sentiment_v1" ? "google-bert/bert-base-uncased" : createForm.models })} />
+      {createForm.evaluatorKey === "lab02_sentiment_v1" && <DatasetField value={createForm.datasetConfig} onChange={(value) => setCreateForm({ ...createForm, datasetConfig: value })} />}
       <Field label="허용 base models" hint="쉼표로 구분"><input className={inputClass} value={createForm.models} onChange={(event) => setCreateForm({ ...createForm, models: event.target.value })} /></Field>
       <Field label="허용 architectures" hint="쉼표로 구분"><input className={inputClass} value={createForm.architectures} onChange={(event) => setCreateForm({ ...createForm, architectures: event.target.value })} /></Field>
       <div className="sm:col-span-2"><Field label="설명"><textarea className={inputClass} value={createForm.description} onChange={(event) => setCreateForm({ ...createForm, description: event.target.value })} /></Field></div>
@@ -121,6 +124,7 @@ export default function AdminTasksPage() {
       <Field label="제목"><input required className={inputClass} value={editForm.title} onChange={(event) => setEditForm({ ...editForm, title: event.target.value })} /></Field>
       <Field label="Stage"><select className={inputClass} value={editForm.stage} onChange={(event) => setEditForm({ ...editForm, stage: event.target.value as TaskStage })}>{Object.entries(STAGE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
       <EvaluatorSelect value={editForm.evaluatorKey} onChange={(value) => setEditForm({ ...editForm, evaluatorKey: value })} />
+      {editForm.evaluatorKey === "lab02_sentiment_v1" && <DatasetField value={editForm.datasetConfig} onChange={(value) => setEditForm({ ...editForm, datasetConfig: value })} />}
       <label className="flex items-end gap-2 pb-3 text-sm"><input type="checkbox" checked={editForm.isPublic} onChange={(event) => setEditForm({ ...editForm, isPublic: event.target.checked })} />학생에게 공개</label>
       <Field label="허용 base models" hint="필수, 쉼표로 구분"><input className={inputClass} value={editForm.models} onChange={(event) => setEditForm({ ...editForm, models: event.target.value })} /></Field>
       <Field label="허용 architectures" hint="필수, 쉼표로 구분"><input className={inputClass} value={editForm.architectures} onChange={(event) => setEditForm({ ...editForm, architectures: event.target.value })} /></Field>
@@ -139,11 +143,17 @@ export default function AdminTasksPage() {
 }
 
 function EvaluatorSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  return <Field label="Evaluator" hint="현재 Mock만 실행됩니다. Lab02 실제 평가는 아직 사용할 수 없습니다.">
+  return <Field label="Evaluator" hint="Lab02는 서버 모델·tokenizer와 로컬 평가 데이터를 먼저 준비해야 합니다. 기존 점수와 다른 평가입니다.">
     <select aria-label="Evaluator" className={inputClass} value={value} onChange={(event) => onChange(event.target.value)}>
       <option value="mock_v1">mock_v1 · deterministic Mock</option>
-      <option value="lab02_sentiment_v1" disabled>lab02_sentiment_v1 · 사용 불가</option>
+      <option value="lab02_sentiment_v1">lab02_sentiment_v1 · 실제 Macro F1</option>
       {value !== "mock_v1" && value !== "lab02_sentiment_v1" && <option value={value} disabled>미지원 evaluator 설정</option>}
     </select>
   </Field>;
+}
+
+function DatasetField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return <div className="sm:col-span-2"><Field label="Lab02 dataset 설정" hint="관리자 준비 명령이 반환한 JSON. 데이터 버전 변경 시 기존 점수는 집계에서 제외됩니다.">
+    <textarea className={`${inputClass} min-h-36 font-mono`} value={value} onChange={(event) => onChange(event.target.value)} required />
+  </Field></div>;
 }
