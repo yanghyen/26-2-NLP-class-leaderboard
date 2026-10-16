@@ -188,8 +188,10 @@ The provided full Lab2 ZIP also passed production validation, CPU model loading,
 four-review public IMDb smoke inference, metric calculation, SQLite Worker saving,
 leaderboard inclusion and artifact-copy deletion. Macro F1 was 0.7333333333333334,
 Accuracy 0.75 on those four samples; these are **not** full IMDb leaderboard scores.
-The original supplied ZIP was preserved. Full IMDb evaluation, CUDA/GPU, real Redis,
-PostgreSQL and Docker integration are not verified by that smoke check. On this
-Mac Docker/Redis executables and CUDA are unavailable; only a PostgreSQL client was
-found, so no existing server/database was touched. Existing SQLite migration tests
-cover DB compatibility; no new migration is required.
+The original supplied ZIP was preserved. That initial smoke check did not verify
+full IMDb, CUDA/GPU, real Redis/PostgreSQL or Docker. The 2026-10-16 follow-up verified
+real Redis, a separate PostgreSQL server, actual HTTP uploads, CPU inference,
+Baseline/Development aggregation, cleanup and interrupted Worker recovery.
+See [operations verification](lab02-operations-verification.md) for evidence,
+the user-run browser checklist and remaining Docker/GPU checks. No existing
+server/database was touched; no new migration is required.

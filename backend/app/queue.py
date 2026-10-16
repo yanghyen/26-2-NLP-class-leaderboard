@@ -25,7 +25,13 @@ class RedisJobQueue:
 
     def enqueue(self, job_id: str) -> None:
         try:
-            self.client.rpush(self.name, job_id)
+            # Recovery may redispatch a DB-backed QUEUED job. Keep FIFO without
+            # accumulating copies on every sweep (Redis >= 6; Compose uses 7).
+            self.client.eval(
+                "if not redis.call('LPOS', KEYS[1], ARGV[1]) then "
+                "return redis.call('RPUSH', KEYS[1], ARGV[1]) end return 0",
+                1, self.name, job_id,
+            )
         except RedisError as exc:
             raise QueueUnavailableError("evaluation queue is unavailable") from exc
 

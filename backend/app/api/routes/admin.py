@@ -156,7 +156,7 @@ def retry_job(
         raise HTTPException(status_code=409, detail="평가 완료 후 자동 삭제되는 제출은 재평가할 수 없습니다.")
     if job is None or job.status != SubmissionStatus.FAILED or not job.error_kind:
         raise HTTPException(status_code=400, detail="재시도할 수 없는 Job입니다.")
-    if job.error_kind not in {"EVALUATION_FAILED", "QUEUE_UNAVAILABLE", "SERVER_ERROR_RETRY"}:
+    if job.error_kind not in {"EVALUATION_FAILED", "QUEUE_UNAVAILABLE", "SERVER_ERROR_RETRY", "WORKER_INTERRUPTED"}:
         raise HTTPException(status_code=400, detail="학생 제출 오류는 자동 재시도하지 않습니다.")
     if not storage.artifact_path(job.submission_id).is_dir():
         raise HTTPException(status_code=409, detail="제출 파일이 없어 재평가할 수 없습니다.")

@@ -2,6 +2,9 @@
 
 Course project submission and leaderboard platform for a second-year NLP class.
 
+Latest Lab02 operations verification (2026-10-16):
+[CPU/Redis/PostgreSQL results, restart recovery, browser checklist and GPU deployment decisions](docs/lab02-operations-verification.md).
+
 ## Structure
 
 - `backend/`: FastAPI API, SQLAlchemy models, Alembic migration, tests, evaluator interfaces.

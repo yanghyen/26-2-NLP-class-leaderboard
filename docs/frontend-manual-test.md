@@ -1,5 +1,9 @@
 # Frontend verification
 
+For the latest user-run Lab02 browser checklist and the separately verified
+real HTTP/API results, see [2026-10-16 operations verification](lab02-operations-verification.md).
+Browser verification is intentionally left to the user per their request.
+
 Run `npm test`, `npm run typecheck`, `npm run lint`, `npm run build` in `frontend/`. Public routes are `/tasks`, `/tasks/{slug}`, `/submit`, `/submissions`, `/submissions/{uuid}`, `/leaderboard`, `/profile` (local records), and `/dashboard` (tasks). `/` redirects to `/tasks`. `/login` is admin-only; `/register` and `/admin/join-code` no longer exist. Admin routes are protected by the shell and by backend Bearer authorization.
 
 ## Manual checklist (user-run)

@@ -49,7 +49,9 @@ services:
     pids_limit: 256
     read_only: true
     tmpfs:
-      - /tmp:size=128m,noexec,nosuid,nodev
+      # Starlette spools multipart files here before bounded upload validation.
+      # A default 500 MB ZIP plus Notebook cannot fit in the former 128 MB mount.
+      - /tmp:size=1g,noexec,nosuid,nodev
 
   worker:
     build:
